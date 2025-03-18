@@ -60,7 +60,6 @@ import warnings
 
 import PIL.Image
 import scipy
-import scipy.misc
 import scipy.signal
 import skimage
 
@@ -69,8 +68,7 @@ from scipy.signal import fftconvolve
 from scipy.signal import correlate2d
 
 import scipy.ndimage
-import scipy.ndimage.filters
-from   scipy.ndimage.filters import median_filter as median
+from   scipy.ndimage import median_filter as median
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -165,10 +163,6 @@ def main():
         path = os.path.dirname(source_fn)
         prefix = os.path.splitext(os.path.basename(source_fn))[0]
         output_fn = os.path.join(path, prefix + "-aligned.tiff")
-
-    if os.path.isfile(output_fn):
-        log(f"quitting ealry since output already exists: {output_fn}")
-        return 0
 
     mask = None
 
@@ -461,7 +455,7 @@ def gradient_ascent(
         angle,
         min_iterations=7,
         max_iterations=36,
-        min_score=0.6,
+        min_score=0.7,
         show_pdone=False,
         count=None,
         max_count=None,
