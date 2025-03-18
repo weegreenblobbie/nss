@@ -1,0 +1,8 @@
+# Make sure you apt install python3-tk first!
+ipython
+pillow
+matplotlib
+numpy
+scipy
+scikit-image
+tifffile
