@@ -153,6 +153,8 @@ def main():
     assert os.path.isfile(target_fn), "Could not find file " + target_fn
     assert os.path.isfile(source_fn), "Could not find file " + source_fn
 
+    assert target_fn != source_fn, "Target and Source are the same file!"
+
     if mask_fn:
         assert os.path.isfile(mask_fn), "Could not find file " + mask_fn
 
@@ -453,9 +455,9 @@ def gradient_ascent(
         src_pos,
         src_off,
         angle,
-        min_iterations=7,
-        max_iterations=36,
-        min_score=0.7,
+        min_iterations=36,
+        max_iterations=72,
+        min_score=1.0,
         show_pdone=False,
         count=None,
         max_count=None,
@@ -519,7 +521,15 @@ def gradient_ascent(
         rn = np.random.randint(-3,3)
         ra = np.random.choice(da_pool)
 
-        scores.append(patch.score(tgt, (m + rm, n + rn), angle + ra))
+        m0 = m + rm
+        n0 = n + rn
+
+        if m0 < 0:
+            m0 = 0
+        if n0 < 0:
+            n0 = 0
+
+        scores.append(patch.score(tgt, (m0, n0), angle + ra))
 
         # Find best score and parameters
 
@@ -747,6 +757,11 @@ def coarse_align_param_search(target, source, mask, patch_radius):
                 n += rn
                 angle += ra
 
+                if m < 0:
+                    m = 0
+                if n < 0:
+                    n = 0
+
                 walk_scores.append(src_patch.score(target, (m, n), angle))
 
                 count += 1
@@ -970,21 +985,30 @@ class Patch(object):
 
         size = self._gray.shape[0]  # size of the patch
 
-        radius = size // 2
-
         m, n = tgt_pos # upper left corner on target image
+
+        assert m >= 0, f"invalid m: {m}"
+        assert n >= 0, f"invalid n: {n}"
 
         # compute indices into target image and limit at image boundary
 
         m0 = m
         m1 = m0 + size
 
+        n0 = n
+        n1 = n0 + size
+
+        if m0 < 0:
+            m0 = 0
+            m1 = size
+
         if m1 > H:
             m1 = H
             m0 = m1 - size
 
-        n0 = n
-        n1 = n0 + size
+        if n0 < 0:
+            n0 = 0
+            n1 = size
 
         if n1 > W:
             n1 = W
@@ -997,6 +1021,8 @@ class Patch(object):
         # rotate the patch to angle
 
         p = self.rotate(angle)
+
+        assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}, {m0}:{m1},{n0}:{n1}, (tgt.shape: {tgt.shape})"
 
         score = xcorr_score(p, t)
 
@@ -1310,6 +1336,8 @@ def xcorr_score(p, t):
     approach 0, and if they match exactly oppisote, approach -1.0.
     '''
 
+    assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}"
+
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', r'Mean of empty slice')
         warnings.filterwarnings('ignore', r'invalid value encountered in less')
@@ -1370,6 +1398,6 @@ def xcorr_score(p, t):
     return s
 
 
-
 if __name__ == "__main__":
-    main()
+    with timeit("Total processing: "):
+        main()
