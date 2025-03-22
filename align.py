@@ -515,7 +515,7 @@ def gradient_ascent(
         scores.append(patch.score(tgt, (m, n), angle - da))
         scores.append(patch.score(tgt, (m, n), angle + da))
 
-        # Shift and rotate the patch randomally
+        # Shift and rotate the patch randomly.
 
         rm = np.random.randint(-3,3)
         rn = np.random.randint(-3,3)
@@ -790,7 +790,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             best_scores.append(best)
 
         #---------------------------------------------------------------------
-        # Pull out maxium score from transations.
+        # Pull out maximum score.
         best = max(best_scores)
         score = best.score
 
@@ -1332,8 +1332,8 @@ def xcorr_score(p, t):
 
     score = average(patch * target)
 
-    When shapes match well, the score appraoches 1.0, when they mismatch they
-    approach 0, and if they match exactly oppisote, approach -1.0.
+    When shapes match well, the score approaches 1.0, when they mismatch they
+    approach 0, and if they match exactly opposite, approach -1.0.
     '''
 
     assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}"
