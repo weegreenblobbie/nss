@@ -39,14 +39,14 @@ The algorithm
 
 step 1 - coarse parameter search
 
-The frist step is the do exhustive alignments with patches on a very coarse
+The first step is the do exhaustive alignments with patches on a very coarse
 grid between the source image and the target.  These parameters are stored and
-used for the next step as starting paramters
+used for the next step as starting parameters
 
 set 2 - fine patch alignment
 
 Given the coarse grid parameters, break the src image into small patches and
-peform a gradient asscent search for best fit, start the search with the
+perform a gradient ascent search for best fit, start the search with the
 coarse parameters at the starting location
 '''
 
@@ -94,7 +94,7 @@ def main():
         "--cache",
         default = None,
         type = str,
-        help = "Reads a previously computed coarse aligment cache file."
+        help = "Reads a previously computed coarse alignment cache file."
     )
 
     parser.add_argument(
@@ -102,14 +102,20 @@ def main():
         "--target",
         required = True,
         type = str,
-        help = "specifes the target image that all other images are alinged to"
+        help = "Specifies the target image that all other images are aligned to"
     )
 
     parser.add_argument(
         "-m",
         "--mask",
         type = str,
-        help = "specifes the mask image, pixels that are black are ignored during processing"
+        help = "Specifies the mask image, pixels that are black are ignored during processing"
+    )
+
+    parser.add_argument(
+        "--moon",
+        action = "store_true",
+        help = "Optimize processing for moon images"
     )
 
     parser.add_argument(
@@ -117,7 +123,7 @@ def main():
         "--output",
         type = str,
         default = None,
-        help = "specifes the aligned output image name, default is {prefix}-aligned.tiff"
+        help = "Specifies the aligned output image name, default is {prefix}-aligned.tiff"
     )
 
     parser.add_argument(
@@ -126,6 +132,14 @@ def main():
         action = "store_true",
         default = False,
         help = "plot a summary at the end"
+    )
+
+    parser.add_argument(
+        "-r",
+        "--radius",
+        default = RADIUS,
+        type = int,
+        help = "The patch radius to use for alignment"
     )
 
     parser.add_argument(
@@ -197,7 +211,8 @@ def main():
                 target,
                 source,
                 mask,
-                60,
+                args.radius,
+                moon=args.moon,
             )
 
             if args.save_cache:
@@ -208,7 +223,7 @@ def main():
 
         print_param_cache(param_cache)
 
-    radius = RADIUS
+    radius = args.radius
 
     with timeit("Aligning images\n"):
         target, source, aligned = align_images(
@@ -288,25 +303,6 @@ def imresize(array, scale):
         f"output array dtype changed by imresize! ({in_dtype} != {out.dtype})"
 
     return out.astype(in_dtype)
-
-
-def imshow(array):
-
-    peak = np.nanmax(array)
-
-    if peak < 1.0:
-        peak = 1.0
-
-    # gray scale
-    if array.ndim == 2:
-        plt.imshow(array / peak, cmap = 'gray', interpolation='nearest')
-
-    # color
-    elif array.ndim == 3:
-        plt.imshow(array / peak, interpolation='nearest')
-
-    else:
-        raise RuntimeError("don't know how to handle array with shape %s" % repr(array.shape))
 
 
 def align_images(target, source, mask, radius, param_cache):
@@ -586,7 +582,34 @@ def gradient_ascent(
     return patch, best
 
 
-def coarse_align_param_search(target, source, mask, patch_radius):
+def plot_patches(data, windows, show=True, title="windows"):
+
+    data = np.array(data)
+    data[np.isnan(data)] = 0.0
+    data **= 0.5
+    black = "black"
+    white = "white"
+    red = "red"
+
+    plt.figure(facecolor=black, figsize=(16,8))
+    plt.title(title, color=white)
+    ax = plt.gca()
+    imshow(data)
+
+    for win in windows:
+        m0, n0 = win["pos"]
+        size = win["size"]
+        rect = plt.Rectangle((m0, n0), size, size, ls='-', color=white, fill=False)
+        ax.add_patch(rect)
+        ax.text(m0, n0 + size/2.0, f"%.3f" % win["score"], color=red)
+
+    if show:
+        plt.show()
+
+
+def coarse_align_param_search(target, source, mask, patch_radius, **kwargs):
+
+    moon = kwargs.get("moon", False)
 
     param_cache = dict()
 
@@ -622,6 +645,9 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     #-------------------------------------------------------------------------
     # Perform searches in windows with maximum deltas.
 
+    src = np.sqrt(np.array(source_gray))
+    src -= np.nanmean(src)
+    
     candidates = []
 
     for m in range(0, M - patch_radius, patch_radius):
@@ -633,13 +659,27 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             n0 = n
             n1 = n0 + patch_width
 
-            p = source_gray[m0 : m1, n0 : n1]
+            p = np.array(src[m0 : m1, n0 : n1])
 
-            delta = np.nanmax(p) - np.nanmin(p)
+            pixel_range = np.nanmax(p) - np.nanmin(p)
+            if moon:
+                # Boost the score of patches based on the sum of the
+                # pixels in the patch, this should favor patches including
+                # parts the moon rather than patches with only stars.
+                score = pixel_range * np.nansum(p.flatten())
+            else:
+                score = pixel_range
 
-            candidates.append(dict(delta=delta, pos=(m,n)))
+            candidates.append(dict(score=score, pos=(m,n), size=patch_width))
 
-    candidates = sorted(candidates, key = lambda x: x['delta'], reverse = True)
+    candidates = sorted(candidates, key = lambda x: x["score"], reverse = True)
+
+    # Normalize the scores.
+    max_score = max(candidates[0]["score"], 1.0)
+    print(f"Max score before normalizing: {max_score}")
+
+    for can in candidates:
+        can["score"] /= max_score
 
     #-------------------------------------------------------------------------
     # Downsample the candidate so they they are at least 2 radii away.
@@ -647,12 +687,14 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     sparse_candidates = [ candidates[0] ]
 
     for can in candidates[1:]:
+        score = can["score"]
+        if moon:
+            if score < 0.10:
+                continue
+        elif score < 0.50:
+            continue
 
-        can_pos = can['pos']
-
-        p = can['delta'] / sparse_candidates[0]['delta']
-
-        if p < 0.50: continue
+        can_pos = can["pos"]
 
         distances = []
 
@@ -665,8 +707,10 @@ def coarse_align_param_search(target, source, mask, patch_radius):
                 )
             )
 
-        if np.min(distances) > 4 * patch_radius:
+        if np.min(distances) > 3 * patch_radius:
             sparse_candidates.append(can)
+
+    # plot_patches(source_gray, sparse_candidates)
 
     #-------------------------------------------------------------------------
     # Now take the top N windows.
@@ -688,29 +732,13 @@ def coarse_align_param_search(target, source, mask, patch_radius):
 
     candidates = sparse_candidates[0:num_windows]
 
+    num_windows = len(candidates)
+
     #-------------------------------------------------------------------------
     # Plot target patches that will be aligned with src patches.
-    if False:
 
-        array = np.ones(target.shape)
-        array += source_gray
-
-        invalid = np.isnan(target)
-
-        array[invalid] = 0.0
-
-        for can in candidates:
-            m0, n0 = can['pos']
-            m1 = m0 + patch_width
-            n1 = n0 + patch_width
-            array[m0 : m1, n0 : n1] += 100.0
-
-        plt.figure()
-        imshow(array)
-        plt.title("coarse param search windows")
-
-        plt.show()
-        xxxxxxx
+    #plot_patches(source, candidates, title="coarse param search windows")
+    #xxxxxxx
 
     #--------------------------------------------------------------------------
     # slide patches around the corse window locations
@@ -724,6 +752,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     count = 0
     max_count = num_windows * window_iterations * (random_walk_iterations + gradient_assent_iterations)
 
+    log(f"    patchpatch_width_size = {patch_width}\n")
     log(f"    num_windows = {num_windows}\n")
     log(f"    num_iterations = {max_count}\n")
     log( "    coarse param search: %5.1f%%" % 0.0)
@@ -746,7 +775,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             angle = 0.0
             walk_scores = []
 
-            # Randomally walk.
+            # Randomly walk.
             for j in range(random_walk_iterations):
 
                 rm = np.random.choice([-1, 0, 1])
@@ -805,7 +834,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             )
 
         if score > 1.0001 or score < -1.0001:
-            # Debug if we get scores ourside what isn't possible.
+            # Debug if we get scores outside what isn't possible.
 
             log("Score {} is outside what I thought was possible: +/- 1.0".format(s))
             log("Throwing up some debug plots")
@@ -1304,16 +1333,13 @@ def print_param_cache(param_cache):
 
     print("param_cache:")
 
-    keys = sorted(list(param_cache.keys()))
+    values = list(param_cache.values())
 
-    for k in keys:
+    values = sorted(values, key = lambda x: x["score"])
 
-        v = param_cache[k]
-
+    for v in values:
         print(
-            "    (%5d,%4d): score %.3f heading (%3d,%3d) angle %7.3f" % (
-                k[0],
-                k[1],
+            "score %.3f heading (%3d,%3d) angle %7.3f" % (
                 v['score'],
                 v['heading'][0],
                 v['heading'][1],
