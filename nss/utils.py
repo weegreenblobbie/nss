@@ -1,4 +1,3 @@
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import convolve2d
@@ -20,10 +19,10 @@ def _generate_non_overlapping_creators(outer_radius, num_circles, min_radius, ma
     circles = []
     while len(circles) < num_circles:
         # Generate random center and radius.
-        radius = random.uniform(min_radius, max_radius)
+        radius = np.random.uniform(min_radius, max_radius)
         rr = outer_radius - radius - 1
-        x = random.uniform(-rr, rr)
-        y = random.uniform(-rr, rr)
+        x = np.random.uniform(-rr, rr)
+        y = np.random.uniform(-rr, rr)
         if outer_radius - radius < np.hypot(x, y):
             continue
         # Check for overlaps
@@ -128,3 +127,44 @@ def imshow(array):
 
     else:
         raise RuntimeError("don't know how to handle array with shape %s" % repr(array.shape))
+
+def auto_threshold_otsu(data, bins=32):
+    """
+    Calculates the Otsu threshold for a histogram computed over the data.
+
+    Args:
+        data (numpy.ndarray): The data to compute the histogram.
+        bins (int): The number of bins to use for the histogram.
+
+    Returns:
+        float: The Otsu threshold value.
+    """
+    hist, t_axis = np.histogram(data.flatten(), bins=bins)
+    total = np.sum(hist.flatten())
+    if total <= 0.0:
+        return 0.0
+    max_variance = 0.0
+    best_index = 0.0
+    sum_b = 0.0
+    sum_1 = np.sum(np.arange(hist.size) * hist)
+    w_b = 0.0 # weight for the background class
+    w_f = 0.0 # weight for the foreground class
+    for i in np.arange(hist.size):
+        w_b += hist[i]
+        if w_b <= 0.0:
+            continue
+        w_f = total - w_b
+        if w_f <= 0.0:
+            break
+        sum_b += i * hist[i]
+        mean_b = sum_b / w_b
+        mean_f = (sum_1 - sum_b) / w_f
+
+        variance_between = w_b * w_f * (mean_b - mean_f) ** 2.0
+
+        if variance_between > max_variance:
+            max_variance = variance_between
+            best_index = i
+
+    return np.mean(t_axis[best_index:best_index + 1])
+
