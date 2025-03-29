@@ -3,16 +3,38 @@ import numpy.random
 import secrets
 
 from matplotlib import pyplot as plt
+import tifffile.tifffile
+from tifffile.tifffile import imread
 
 from nss import utils
+from nss.align import to_gray
 
-numpy.random.seed(19881108)
+#numpy.random.seed(19881108)
 
 def test_generate_test_image():
-    array = utils.generate_test_image(radius_moon=400).astype(np.float64)
+    #backup = utils.generate_test_image(radius_moon=300).astype(np.float64)
+    #backup = to_gray(imread("lunar-eclipse/20250313_232149.99.tif")).astype(np.float32)
+    #backup = to_gray(imread("lunar-eclipse/20250313_232746.99.tif")).astype(np.float32)
+    #backup = to_gray(imread("lunar-eclipse/20250313_232842.99.tif")).astype(np.float32)
+    #backup = to_gray(imread("lunar-eclipse/20250313_223345.99.tif")).astype(np.float32) # "cresent" 50%
+    #backup = to_gray(imread("lunar-eclipse/20250313_230824.99.tif")).astype(np.float32) # "cresent" 25%
+    backup = to_gray(imread("lunar-eclipse/20250313_231429.00.tif")).astype(np.float32) # "cresent" 10%
+    
+    utils.detect_moon(backup)
 
-    threshold = utils.auto_threshold_otsu(array)
+    xxxxxxxx
 
+    print(f"shape: {backup.shape}")
+
+    array = np.array(backup)
+    #array -= np.min(array.flatten())
+    #array[array < 0] = 0.0
+    #array **= 0.25
+
+    #threshold = utils.auto_threshold_first_valley(array, bins=64)
+    threshold = utils.auto_threshold_otsu(array, bins=64)
+    #threshold = 6.92
+    print(f"threshold: {threshold}")
     # Threshold.
     plt.figure()
     plt.hist(array.flatten(), bins=64)
@@ -20,7 +42,33 @@ def test_generate_test_image():
     ax.axvline(threshold, color="red")
     plt.grid(True)
 
-    array[array < threshold] = 0
+    #array[array < threshold] = 0
+    sobel = array
+
+    #sobel = utils.sobel_edge_detection(array)
+    sobel = utils.sobel_edge_detection_2(array)
+    sobel /= np.max(sobel.flatten())
+    sobel = (256 * sobel).astype(np.uint8)
+
+    #center, radius = utils.contours(sobel)
+    #circles = [[center[0], center[1], radius]]
+
+    plt.figure()
+    utils.imshow(sobel)
+    plt.title("Sobel edges")
+
+    circles = utils.detect_circle(sobel)
+    #circles = []
+    
+    for x, y, r in circles:
+        print(f"{y:4d},{x:4d} radius: {r}")
+        rect = plt.Circle((y, x), r, ls='-', color="red", fill=False)
+        plt.gca().add_patch(rect)
+
+    plt.show()
+
+    xxxxxxx
+
 
     M, N = array.shape
 
@@ -54,12 +102,12 @@ def test_generate_test_image():
     plt.grid(True)
 
     # Compute moon diameter in vertical and horizontal axes.
-    mthresh = utils.auto_threshold_otsu(mvec ** 0.5)
+    mthresh = 0.05 * np.max(mvec)
     mvec = np.array(mvec)
     mvec[mvec < mthresh] = 0
     mvec = mvec > 0.0
 
-    nthresh = utils.auto_threshold_otsu(nvec ** 0.5)
+    nthresh = 0.05 * np.max(nvec)
     nvec = np.array(nvec)
     nvec[nvec < nthresh] = 0
     nvec = nvec > 0.0
@@ -75,7 +123,7 @@ def test_generate_test_image():
     print(f"diameter: {diameter}")
 
     plt.figure()
-    utils.imshow(array)
+    utils.imshow(backup)
     plt.plot(n, m, "r+", linewidth=10)
 
     radius = diameter / 2.0
