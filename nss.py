@@ -10,6 +10,8 @@ import subprocess
 import sys
 from multiprocessing import Pool
 
+from nss import utils
+
 def main():
 
     parser = argparse.ArgumentParser()
@@ -20,22 +22,6 @@ def main():
         default = 4,
         type = int,
         help = "specifies the number of alignment jobs to run simultaneously"
-    )
-
-    parser.add_argument(
-        "-m",
-        "--mask",
-        default = None,
-        type = str,
-        help = "specifes the mask image, pixels that are black are ignored during processing"
-    )
-
-    parser.add_argument(
-        "-o",
-        "--output",
-        default = None,
-        type = str,
-        help = "specifes the aligned output image name, default is {prefix}-median.tiff"
     )
 
     parser.add_argument(
@@ -68,27 +54,20 @@ def main():
     # To support windows command line, process any globs.
     if '*' in target:
         target = glob.glob(target)[0]
-    if '*' in mask:
-        mask = glob.glob(mask)[0]
     if len(images) == 1 and '*' in images[0]:
         images = glob.glob(images[0])
 
-    images = [x for x in images if '-aligned.tiff' not in x]
-
     images = set(images)
     images -= set([target])
-    if mask: images -= set([mask])
-
     images = sorted(list(images))
 
     assert target not in images
-    assert mask not in images
 
     num_images = len(images)
 
     pool = Pool(processes = args.jobs)
 
-    with timeit():
+    with utils.timeit():
 
         log("Launching {} threads to align {} images...\ntarget: {}".format(args.jobs, num_images, target))
 
@@ -108,33 +87,11 @@ def main():
         log("\n{}/{} jobs failed\n".format(num_errors, num_images))
 
 
-class timeit(object):
-
-
-    def __enter__(self):
-        self.d0 = datetime.datetime.now()
-
-    def __exit__(self, *args):
-        d1 = datetime.datetime.now()
-
-        log("took %.2f seconds\n" % (d1 - self.d0).total_seconds())
-
-def log(msg):
-
-    sys.stdout.write(msg)
-    sys.stdout.flush()
-
-
 def align_job(args):
 
     target, mask, image, logfile = args
 
-    args = [sys.executable, 'align.py', '--target', target]
-
-    if mask:
-        args.extend(['--mask', mask])
-
-    args.append(image)
+    args = [sys.executable, '-m', 'nss.align_moon', '--target', target, image]
 
     log("Launching jobs: {}\n    logfile: {}\n".format(' '.join(args), logfile))
 

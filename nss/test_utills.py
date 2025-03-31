@@ -12,13 +12,13 @@ from nss.align import to_gray
 #numpy.random.seed(19881108)
 
 def test_generate_test_image():
-    #backup = utils.generate_test_image(radius_moon=300).astype(np.float64)
+    
     #backup = to_gray(imread("lunar-eclipse/20250313_232149.99.tif")).astype(np.float32)
     #backup = to_gray(imread("lunar-eclipse/20250313_232746.99.tif")).astype(np.float32)
     #backup = to_gray(imread("lunar-eclipse/20250313_232842.99.tif")).astype(np.float32)
     #backup = to_gray(imread("lunar-eclipse/20250313_223345.99.tif")).astype(np.float32) # "cresent" 50%
     #backup = to_gray(imread("lunar-eclipse/20250313_230824.99.tif")).astype(np.float32) # "cresent" 25%
-    backup = to_gray(imread("lunar-eclipse/20250313_231429.00.tif")).astype(np.float32) # "cresent" 10%
+    #backup = to_gray(imread("lunar-eclipse/20250313_231429.00.tif")).astype(np.float32) # "cresent" 10%
     
     utils.detect_moon(backup)
 
