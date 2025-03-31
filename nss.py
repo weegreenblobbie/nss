@@ -19,7 +19,7 @@ def main():
     parser.add_argument(
         "-j",
         "--jobs",
-        default = 4,
+        default = 7,
         type = int,
         help = "specifies the number of alignment jobs to run simultaneously"
     )
@@ -49,8 +49,6 @@ def main():
     else:
         target = args.target
 
-    mask = args.mask if args.mask else ""
-
     # To support windows command line, process any globs.
     if '*' in target:
         target = glob.glob(target)[0]
@@ -69,11 +67,11 @@ def main():
 
     with utils.timeit():
 
-        log("Launching {} threads to align {} images...\ntarget: {}".format(args.jobs, num_images, target))
+        utils.log("Launching {} threads to align {} images...\ntarget: {}".format(args.jobs, num_images, target))
 
         jobs = []
         for i, img in enumerate(images):
-            jobs.append((target, mask, img, 'nss-log%02d.txt' % (i + 1)))
+            jobs.append((target, img, 'nss-log%02d.txt' % (i + 1)))
 
         results = pool.map(align_job, jobs)
 
@@ -82,18 +80,18 @@ def main():
         for res, logfile in results:
             num_errors += res.returncode != 0
             if res.returncode:
-                log(f"See {logfile} for the error message\n")
+                utils.log(f"See {logfile} for the error message\n")
 
-        log("\n{}/{} jobs failed\n".format(num_errors, num_images))
+        utils.log("\n{}/{} jobs failed\n".format(num_errors, num_images))
 
 
 def align_job(args):
 
-    target, mask, image, logfile = args
+    target, image, logfile = args
 
     args = [sys.executable, '-m', 'nss.align_moon', '--target', target, image]
 
-    log("Launching jobs: {}\n    logfile: {}\n".format(' '.join(args), logfile))
+    utils.log("Launching jobs: {}\n    logfile: {}\n".format(' '.join(args), logfile))
 
     with open(logfile, "w") as fd:
 
