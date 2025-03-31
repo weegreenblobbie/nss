@@ -868,8 +868,7 @@ class Patch(object):
         assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}, {m0}:{m1},{n0}:{n1}, (tgt.shape: {tgt.shape})"
 
         # Root mean squared error.
-        score = rms(t, p)
-        #score = xcorr_score(t, p)
+        score = rms_score(t, p)
 
         rs = RegScore(score, self._start_pos, tgt_pos, angle)
 
@@ -951,9 +950,7 @@ def zscore(array, valid):
 
         return out
 
-def rms(p, t):
-    p = zscore(p, ~np.isnan(p))
-    t = zscore(t, ~np.isnan(t))
+def rms_score(p, t):
     _max = np.sqrt(np.nanmean(t ** 2.0))
     return float(_max - np.sqrt(np.nanmean((t - p) ** 2.0)))
 
