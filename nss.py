@@ -19,7 +19,7 @@ def main():
     parser.add_argument(
         "-j",
         "--jobs",
-        default = 7,
+        default = 4,
         type = int,
         help = "specifies the number of alignment jobs to run simultaneously"
     )
@@ -42,19 +42,19 @@ def main():
     args = parser.parse_args()
 
     images = args.images
+    if len(images) == 1 and '*' in images[0]:
+        images = sorted(glob.glob(images[0]))
 
     if not args.target:
         images = sorted(images)
-        target = images[len(images)//2]
+        target = images[len(images) // 2]
     else:
         target = args.target
 
     # To support windows command line, process any globs.
     if '*' in target:
         target = glob.glob(target)[0]
-    if len(images) == 1 and '*' in images[0]:
-        images = glob.glob(images[0])
-
+    
     images = set(images)
     images -= set([target])
     images = sorted(list(images))
