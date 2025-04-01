@@ -554,6 +554,11 @@ def brute_force_align(
         if new.score > best.score:
             best = new
 
+    ## Manually score and plot alignments.
+    #patch.score(tgt, (m0, n0), 0.0, plot=True)
+    #patch.score(tgt, (m0-1, n0+1), 0.0, plot=True)
+    #plt.show()
+
     log("\n")
     return best
 
