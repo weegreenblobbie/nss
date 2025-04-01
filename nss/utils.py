@@ -536,8 +536,9 @@ def brute_force_align(
 
     for dm in range(-3, 4, 1):
         for dn in range(-3, 4, 1):
-            for da in da_pool:
-                jobs.append( (dm, dn, da) )
+            #for da in da_pool:
+            da = 0.0
+            jobs.append( (dm, dn, da) )
 
     angle = 0.0
     best = patch.score(tgt, (m0, n0), angle)
@@ -549,9 +550,6 @@ def brute_force_align(
         dm, dn, a = job
         m = m0 + dm
         n = n0 + dn
-        #scores.append(patch.score(tgt, (m, n), a))
-        #scores = sorted(scores, key = lambda x: x.score, reverse=True)
-        #best = scores[0]
         new = patch.score(tgt, (m, n), a)
         if new.score > best.score:
             best = new
@@ -951,6 +949,8 @@ def zscore(array, valid):
         return out
 
 def rms_score(p, t):
+    p = zscore(p, ~np.isnan(p))
+    t = zscore(t, ~np.isnan(t))
     _max = np.sqrt(np.nanmean(t ** 2.0))
     return float(_max - np.sqrt(np.nanmean((t - p) ** 2.0)))
 

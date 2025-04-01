@@ -9,16 +9,17 @@ These examples are in **windows powershell** format:
 Align one TIFF against the target:
 
 ```
-python align.py -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
-                   "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232746.99.tif"
+python -m nss.align_moon.py `
+    -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
+       "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232746.99.tif"
 ```
 
-Align multiple TIFFs against the target:
+Align multiple TIFFs against the target using python's multiprocessing:
 ```
-python align.py -t TARGET_TIF TIFF+
+python nss.py -t TARGET_TIF TIFF+
 ```
 
-Align a bunch of files using python multiprocessing:
+For example:
 ```
 python nss.py -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
                  "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\*.tif"
@@ -54,6 +55,8 @@ Given a sequence of exposures that are:
 ## Step 1, picking a target image, all other images are aligned to it
 
 ## Step 2. Invoke the program specifying the target and list of images to align
+
+TODO: Update for MOON processing.
 
 ## Step 3. Perform an exhaustive parameter search
 
