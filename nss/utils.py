@@ -496,14 +496,29 @@ def align_moon_images(target, source, target_circle, source_circle):
     assert source.ndim == 3
     assert target.shape == source.shape
 
+    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
+
     target = to_gray(target)
     source = to_gray(source)
 
-    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
-
     # Mask off pixels outside radius.
-    target = mask_circle(target, target_circle, pad)
-    source = mask_circle(source, source_circle, pad)
+    target = mask_circle(target, target_circle, 2*pad)
+    source = mask_circle(source, source_circle, 2*pad)
+
+    convolve2d = scipy.signal.fftconvolve
+    g = _make_2d_gaussian(32)
+
+    blurry_s = convolve2d(source, g, mode='same')
+    blurry_t = convolve2d(target, g, mode='same')
+
+    source /= blurry_s
+    target /= blurry_t
+
+    source -= np.nanmin(source)
+    source /= np.nanmax(source)
+
+    target -= np.nanmin(target)
+    target /= np.nanmax(target)
 
     # Perform a single alignment using a patch 2x the radius + a little 
     # margin.
@@ -515,14 +530,16 @@ def align_moon_images(target, source, target_circle, source_circle):
     tgt_m0, tgt_n0, tgt_r = target_circle.to_int()
     off_m, off_n, _ = delta.to_int()
 
-    m0 = src_m0 - src_r
-    n0 = src_n0 - src_r
-    m1 = m0 + 2 * src_r + 1
-    n1 = n0 + 2 * src_r + 1
+    r = max(src_r, tgt_r)
+
+    m0 = src_m0 - r
+    n0 = src_n0 - r
+    m1 = m0 + 2 * r + 1
+    n1 = n0 + 2 * r + 1
 
     src = source[m0 : m1, n0 : n1]
 
-    tgt_pos = (tgt_m0 - tgt_r, tgt_n0 - tgt_r)
+    tgt_pos = (tgt_m0 - r, tgt_n0 - r)
     offset = (off_m, off_n)
 
     # DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
@@ -556,7 +573,7 @@ def brute_force_align(
         pad=3
     ):
 
-    da_pool = np.arange(-3.0, 3.1, 0.1)
+    da_pool = np.arange(-0.5, 0.6, 0.1)
 
     m0 = tgt_pos[0]
     n0 = tgt_pos[1]
@@ -567,9 +584,9 @@ def brute_force_align(
 
     for dm in range(-pad, pad+1):
         for dn in range(-pad, pad+1):
-            #for da in da_pool:
-            da = 0.0
-            jobs.append( (dm, dn, da) )
+            for da in da_pool:
+                #da = 0.0
+                jobs.append( (dm, dn, da) )
 
     angle = 0.0
     best = patch.score(tgt, (m0, n0), angle)
@@ -584,10 +601,11 @@ def brute_force_align(
         new = patch.score(tgt, (m, n), a)
         if new.score > best.score:
             best = new
+            j = m
+            k = n
 
-    ## Manually score and plot alignments.
-    #patch.score(tgt, (m0, n0), 0.0, plot=True)
-    #patch.score(tgt, (m0-1, n0-1), 0.0, plot=True)
+    ## Manually score and plot the best alignment.
+    #patch.score(tgt, (j, k), best.angle, plot=True)
     #plt.show()
 
     log("\n")
@@ -972,27 +990,11 @@ def zscore(array, valid):
 
 def rms_score(t, s):
 
-
     #s = sobel_edge_detection(s)
     #t = sobel_edge_detection(t)
 
-    convolve2d = scipy.signal.fftconvolve
-    g = _make_2d_gaussian(32)
-
-    blurry_s = convolve2d(s, g, mode='same')
-    blurry_t = convolve2d(t, g, mode='same')
-
-    s /= blurry_s
-    t /= blurry_t
-
-    s -= np.nanmin(s)
-    s /= np.nanmax(s)
-
-    t -= np.nanmin(t)
-    t /= np.nanmax(t)
-    
     _max = np.sqrt(np.nanmean(t ** 2.0))
-    return float(_max - np.sqrt(np.nanmean((t - s) ** 2.0))), t, s
+    return _max - np.sqrt(np.nanmean((t - s) ** 2.0)), t, s
 
 def xcorr_score(p, t):
     '''
