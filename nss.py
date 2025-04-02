@@ -91,7 +91,7 @@ def align_job(args):
 
     args = [sys.executable, '-m', 'nss.align_moon', '--target', target, image]
 
-    utils.log("Launching jobs: {}\n    logfile: {}\n".format(' '.join(args), logfile))
+    utils.log("Launching job: {}\n    logfile: {}\n".format(' '.join(args), logfile))
 
     with open(logfile, "w") as fd:
 

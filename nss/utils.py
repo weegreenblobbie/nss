@@ -37,8 +37,8 @@ def _gaus2d(x=0.0, y=0.0, mx=0.0, my=0.0, sx=1.0, sy=1.0):
 def _make_2d_gaussian(size):
     x = np.linspace(-size, size, 2 * size + 1)
     x, y = np.meshgrid(x, x)
-    g = _gaus2d(x, y)
-    g /= np.sum(g.flatten())
+    g = _gaus2d(x, y, 0.0, 0.0, size, size)
+    g /= np.sum(g)
     return g
 
 
@@ -444,8 +444,8 @@ def detect_moon(image, grid_size=200, plot=False):
 
     raw_points = list(raw_points)
 
-    np.random.shuffle(raw_points)
-    raw_points = raw_points[:100]
+    #np.random.shuffle(raw_points)
+    #raw_points = raw_points[:100]
     m, n, r = fit_circle(raw_points)
 
     if plot:
@@ -458,6 +458,29 @@ def detect_moon(image, grid_size=200, plot=False):
 
     return Circle(center=(m,n), radius=r)
     
+def mask_circle(image_array, circle, pad=3):
+    """
+    Masks a circle in an image array.
+
+    Args:
+        image_array (numpy.ndarray): The input image array.
+        center (tuple): The (x, y) coordinates of the circle's center.
+        radius (int): The radius of the circle.
+
+    Returns:
+        numpy.ndarray: The masked image array.
+    """
+
+    # Create a black mask with the same size as the image.
+    mask = np.zeros_like(image_array)
+
+    # Draw a white circle on the mask.
+    x, y = int(circle.center[1] + 0.5), int(circle.center[0] + 0.5)
+    radius = int(circle.radius + pad + 0.5)
+    cv2.circle(mask, (x, y), radius, 1.0, -1)  # -1 fills the circle.
+
+    # Apply the mask.
+    return image_array * mask
 
 def align_moon_images(target, source, target_circle, source_circle):
     """
@@ -473,7 +496,14 @@ def align_moon_images(target, source, target_circle, source_circle):
     assert source.ndim == 3
     assert target.shape == source.shape
 
-    radius = int(max(target_circle.radius, source_circle.radius) + 0.5)
+    target = to_gray(target)
+    source = to_gray(source)
+
+    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
+
+    # Mask off pixels outside radius.
+    target = mask_circle(target, target_circle, pad)
+    source = mask_circle(source, source_circle, pad)
 
     # Perform a single alignment using a patch 2x the radius + a little 
     # margin.
@@ -490,7 +520,7 @@ def align_moon_images(target, source, target_circle, source_circle):
     m1 = m0 + 2 * src_r + 1
     n1 = n0 + 2 * src_r + 1
 
-    src = source[m0 : m1, n0 : n1, :]
+    src = source[m0 : m1, n0 : n1]
 
     tgt_pos = (tgt_m0 - tgt_r, tgt_n0 - tgt_r)
     offset = (off_m, off_n)
@@ -515,6 +545,7 @@ def align_moon_images(target, source, target_circle, source_circle):
         target,
         tgt_pos,
         offset,
+        pad
     )
 
 def brute_force_align(
@@ -522,8 +553,8 @@ def brute_force_align(
         tgt,
         tgt_pos,
         offset,
+        pad=3
     ):
-    tgt = to_gray(tgt)
 
     da_pool = np.arange(-3.0, 3.1, 0.1)
 
@@ -534,8 +565,8 @@ def brute_force_align(
 
     jobs = []
 
-    for dm in range(-3, 4, 1):
-        for dn in range(-3, 4, 1):
+    for dm in range(-pad, pad+1):
+        for dn in range(-pad, pad+1):
             #for da in da_pool:
             da = 0.0
             jobs.append( (dm, dn, da) )
@@ -556,7 +587,7 @@ def brute_force_align(
 
     ## Manually score and plot alignments.
     #patch.score(tgt, (m0, n0), 0.0, plot=True)
-    #patch.score(tgt, (m0-1, n0+1), 0.0, plot=True)
+    #patch.score(tgt, (m0-1, n0-1), 0.0, plot=True)
     #plt.show()
 
     log("\n")
@@ -639,8 +670,6 @@ def zscore(array, valid):
         warnings.filterwarnings('ignore', r'invalid value encountered in true_divide')
 
         array = np.array(array)
-
-        array[~valid] = np.nan
 
         mu = np.nanmean(array)
         sig = np.nanstd(array)
@@ -780,15 +809,8 @@ class Patch(object):
     written to the final aligned image.
     '''
 
-    def __init__(self, rgb, start_pos):
-
-        assert \
-            rgb.ndim == 3, \
-            "Error, expecting patch to be a color image, got shape = %s" % \
-                repr(rgb.shape)
-
-        self._rgb = np.array(rgb)
-        self._gray = to_gray(rgb)
+    def __init__(self, image, start_pos):
+        self._gray = to_gray(image)
         self._gray[np.isnan(self._gray)] = 0.0
         self._cache = dict()
         self._start_pos = start_pos
@@ -801,9 +823,6 @@ class Patch(object):
             cval = np.nan
         )
         self.shape = self._gray.shape
-
-    def color_array(self):
-        return self._rgb
 
     def rotate(self, angle):
         key = int(angle * 1000 + 0.5)
@@ -818,7 +837,6 @@ class Patch(object):
         self._cache[key] = p
 
         return p
-
 
     def score(self, tgt, tgt_pos, angle, plot=False):
 
@@ -862,22 +880,27 @@ class Patch(object):
 
         # extract patch from target
 
-        t = tgt[m0 : m1, n0 : n1]
+        t = np.array(tgt[m0 : m1, n0 : n1])
 
         # rotate the patch to angle
 
-        p = self.rotate(angle)
+        s = np.array(self.rotate(angle))
 
-        assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}, {m0}:{m1},{n0}:{n1}, (tgt.shape: {tgt.shape})"
+        assert s.shape == t.shape, f"shape mismatch: {s.shape} != {t.shape}, {m0}:{m1},{n0}:{n1}, (tgt.shape: {tgt.shape})"
+
+        #if plot:
+        #    plt.figure()
+        #    imshow(np.array(t))
+        #    plt.title("tgt before")
 
         # Root mean squared error.
-        score = rms_score(t, p)
+        score, t, s = rms_score(t,s)
 
         rs = RegScore(score, self._start_pos, tgt_pos, angle)
 
         if plot:
             plt.figure()
-            imshow(self._gray)
+            imshow(s)
             plt.title("src")
 
             plt.figure()
@@ -885,20 +908,14 @@ class Patch(object):
             plt.title("tgt")
 
             plt.figure()
-            imshow(t - p)
+            imshow(t - s)
             plt.title(f"score={score:.4g} tgt_pos:{rs.heading}, angle:{angle:.4f}")
+            print(f"{score:.4g}")
 
             #plt.show()
 
         return rs
-
-    def plot(self, title):
-        plt.figure()
-        imshow(self._gray)
-        plt.title(title)
-        plt.show()
-
-
+    
 
 class RegScore(object):
     '''
@@ -953,11 +970,29 @@ def zscore(array, valid):
 
         return out
 
-def rms_score(p, t):
-    p = zscore(p, ~np.isnan(p))
-    t = zscore(t, ~np.isnan(t))
+def rms_score(t, s):
+
+
+    #s = sobel_edge_detection(s)
+    #t = sobel_edge_detection(t)
+
+    convolve2d = scipy.signal.fftconvolve
+    g = _make_2d_gaussian(32)
+
+    blurry_s = convolve2d(s, g, mode='same')
+    blurry_t = convolve2d(t, g, mode='same')
+
+    s /= blurry_s
+    t /= blurry_t
+
+    s -= np.nanmin(s)
+    s /= np.nanmax(s)
+
+    t -= np.nanmin(t)
+    t /= np.nanmax(t)
+    
     _max = np.sqrt(np.nanmean(t ** 2.0))
-    return float(_max - np.sqrt(np.nanmean((t - p) ** 2.0)))
+    return float(_max - np.sqrt(np.nanmean((t - s) ** 2.0))), t, s
 
 def xcorr_score(p, t):
     '''

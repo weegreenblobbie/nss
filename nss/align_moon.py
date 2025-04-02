@@ -199,7 +199,8 @@ def main():
             target_circle,
             source_circle
         )
-        
+        print(f"final score: {alignment.score:.5g}")
+
     # Apply alignment.
     delta_m, delta_n = alignment.heading
     angle = round(alignment.angle, 4)
@@ -212,6 +213,7 @@ def main():
         aligned *= (1 << 16) -1
         aligned = aligned.astype(np.uint16)
         imwrite(output_fn, aligned, photometric="rgb")
+
 
 if __name__ == "__main__":
     main()
