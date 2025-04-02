@@ -506,7 +506,7 @@ def align_moon_images(target, source, target_circle, source_circle):
     source = mask_circle(source, source_circle, 2*pad)
 
     convolve2d = scipy.signal.fftconvolve
-    g = _make_2d_gaussian(32)
+    g = _make_2d_gaussian(int(target_circle.radius / 18.0))
 
     blurry_s = convolve2d(source, g, mode='same')
     blurry_t = convolve2d(target, g, mode='same')
