@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.ndimage
+import scipy.special
 from scipy.signal import convolve2d
 
 
@@ -283,42 +284,6 @@ def sobel_edge_detection(image_array):
 
     return gradient_magnitude
 
-def sobel_edge_detection_2(image_array):
-    """
-    Computes the Sobel transform with 45-degree rotated kernels.
-
-    Args:
-        image_array (numpy.ndarray): The input grayscale image array.
-
-    Returns:
-        numpy.ndarray: The gradient magnitude image.
-    """
-    """
-    Applies Sobel edge detection to an image.
-
-    Args:
-        image_array (numpy.ndarray): The input grayscale image array.
-
-    Returns:
-        numpy.ndarray: The edge-detected image array.
-    """
-    assert image_array.ndim == 2
-
-    # Apply Sobel filters in the x and y directions.
-    sobelx = cv2.Sobel(image_array, cv2.CV_32F, 1, 0, ksize=5)
-    sobely = cv2.Sobel(image_array, cv2.CV_32F, 0, 1, ksize=5)
-
-    # rotate array 45 degrees.
-    image_45 = scipy.ndimage.rotate(image_array, angle=45, reshape=False)
-    sobelx_45 = cv2.Sobel(image_45, cv2.CV_32F, 1, 0, ksize=5)
-    sobely_45 = cv2.Sobel(image_45, cv2.CV_32F, 0, 1, ksize=5)
-    sobelx_45 = scipy.ndimage.rotate(sobelx_45, angle=-45, reshape=False)
-    sobely_45 = scipy.ndimage.rotate(sobely_45, angle=-45, reshape=False)
-
-    gradient = np.sqrt(sobelx**2 + sobely**2 + sobelx_45**2 + sobely_45**2)
-
-    return gradient
-
 def to_gray(image):
 
     match image.ndim:
@@ -458,7 +423,7 @@ def detect_moon(image, grid_size=200, plot=False):
 
     return Circle(center=(m,n), radius=r)
     
-def mask_circle(image_array, circle, pad=3):
+def mask_circle(image_array, circle, pad=3, outside=0.0, inside=1.0):
     """
     Masks a circle in an image array.
 
@@ -472,15 +437,110 @@ def mask_circle(image_array, circle, pad=3):
     """
 
     # Create a black mask with the same size as the image.
-    mask = np.zeros_like(image_array)
+    mask = np.ones_like(image_array) * outside
 
     # Draw a white circle on the mask.
     x, y = int(circle.center[1] + 0.5), int(circle.center[0] + 0.5)
     radius = int(circle.radius + pad + 0.5)
-    cv2.circle(mask, (x, y), radius, 1.0, -1)  # -1 fills the circle.
+    cv2.circle(mask, (x, y), radius, inside, -1)  # -1 fills the circle.
 
     # Apply the mask.
     return image_array * mask
+
+
+def squash(array, circle, size):
+    """
+    Applies a sliding window to an image, mapping the center pixel to a sigmoid value
+    based on its sorted rank within the window.
+
+    Args:
+        array (numpy.ndarray): The input image array (grayscale).
+        window_size (int): The size of the sliding window (must be odd).
+
+    Returns:
+        numpy.ndarray: The processed image array.
+    """
+
+    if size % 2 == 0:
+        raise ValueError("Window size must be odd.")
+
+    # Median filtering, helps reduce the noise.
+    array = cv2.medianBlur(array, 3)
+    array = cv2.medianBlur(array, 3)
+    array = cv2.medianBlur(array, 3)
+
+    center_m, center_n, radius = circle.to_int()
+
+    width = 2 * radius + 1
+
+    mask = np.zeros_like(array) * np.nan
+
+    # Draw a white circle on the mask.
+    x, y = center_n, center_m
+    cv2.circle(mask, (x, y), radius, 1.0, -1)  # -1 fills the circle.
+
+    output = np.zeros((width, width), dtype=np.float32)
+    s2 = size // 2
+    M0 = center_m - radius - s2
+    M1 = M0 + width + s2
+
+    N0 = center_n - radius - s2
+    N1 = N0 + width + s2
+
+    erase = '\b' * 128
+    for m in range(width):
+        log(f"{erase}    {m+1:4d}/{width}: squashing ")
+        for n in range(width):
+
+            m0 = M0 + m
+            m1 = m0 + size
+
+            n0 = N0 + n
+            n1 = n0 + size
+
+            cm = m0 + s2
+            cn = n0 + s2
+
+            if np.isnan(mask[cm,cn]):
+                continue
+
+            window = array[m0:m1, n0:n1] * mask[m0:m1, n0:n1]
+
+            min_val = np.nanmin(window)
+            max_val = np.nanmax(window)
+
+            mag = max_val - min_val
+
+            if mag == 0:  # Avoid explosions.
+                output[m, n] = 0.0
+            else:
+                output[m, n] = (array[cm,cn] - min_val) / mag
+            #output[m, n] = mag
+
+    # Write output back into array.
+    m0 = center_m - radius
+    m1 = m0 + output.shape[0]
+    n0 = center_n - radius
+    n1 = n0 + output.shape[1]
+    array[m0:m1, n0:n1] = output
+    array -= np.nanmin(array)
+    array /= np.nanmax(array)
+    return array
+
+
+def blur_normalize(array, size):
+
+    convolve2d = scipy.signal.fftconvolve
+    g = _make_2d_gaussian(size)
+
+    array /= convolve2d(array, g, mode='same')
+    mmax = np.nanmax(array)
+    mmin = np.nanmin(array)
+    range = mmax - mmin
+    if range > 0.0:
+        return (array - mmin) / range
+    return array
+
 
 def align_moon_images(target, source, target_circle, source_circle):
     """
@@ -496,29 +556,10 @@ def align_moon_images(target, source, target_circle, source_circle):
     assert source.ndim == 3
     assert target.shape == source.shape
 
-    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
-
     target = to_gray(target)
     source = to_gray(source)
 
-    # Mask off pixels outside radius.
-    target = mask_circle(target, target_circle, 2*pad)
-    source = mask_circle(source, source_circle, 2*pad)
-
-    convolve2d = scipy.signal.fftconvolve
-    g = _make_2d_gaussian(int(target_circle.radius / 18.0))
-
-    blurry_s = convolve2d(source, g, mode='same')
-    blurry_t = convolve2d(target, g, mode='same')
-
-    source /= blurry_s
-    target /= blurry_t
-
-    source -= np.nanmin(source)
-    source /= np.nanmax(source)
-
-    target -= np.nanmin(target)
-    target /= np.nanmax(target)
+    center_m, center_n, r = source_circle.to_int()
 
     # Perform a single alignment using a patch 2x the radius + a little 
     # margin.
@@ -528,6 +569,7 @@ def align_moon_images(target, source, target_circle, source_circle):
     # source image.
     src_m0, src_n0, src_r = source_circle.to_int()
     tgt_m0, tgt_n0, tgt_r = target_circle.to_int()
+
     off_m, off_n, _ = delta.to_int()
 
     r = max(src_r, tgt_r)
@@ -542,20 +584,26 @@ def align_moon_images(target, source, target_circle, source_circle):
     tgt_pos = (tgt_m0 - r, tgt_n0 - r)
     offset = (off_m, off_n)
 
-    # DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
-    if False:
-        plt.figure()
-        imshow(src)
-        plt.title("src")
-        plt.figure()
-        imshow(target[tgt_pos[0]:tgt_pos[0] + 2*radius, tgt_pos[1]:tgt_pos[1] + 2*radius])
-        plt.title("tgt")
-        plt.show()
-    # DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG DEBUG
-
     print(f"offset: {offset}")
     print(f"Target: pos: {tgt_pos[0]},{tgt_pos[1]}, radius: {tgt_r}")
     print(f"Source: pos: {m0},{n0}, radius: {src_r}")
+
+    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
+
+    target -= np.nanmin(target)
+    target /= np.nanmax(target)
+
+    source -= np.nanmin(source)
+    source /= np.nanmax(source)
+
+    target = mask_circle(target, target_circle, 2*pad)
+    source = mask_circle(source, source_circle, 2*pad)
+
+    with timeit():
+        target = squash(target, target_circle, 101)
+
+    with timeit():
+        source = squash(source, source_circle, 101)
 
     return brute_force_align(
         src,
@@ -573,7 +621,7 @@ def brute_force_align(
         pad=3
     ):
 
-    da_pool = np.arange(-0.5, 0.6, 0.1)
+    da_pool = np.arange(-0.5, 0.6, 0.1)   
 
     m0 = tgt_pos[0]
     n0 = tgt_pos[1]
@@ -594,12 +642,12 @@ def brute_force_align(
     scores = [best]
     erase = "\b" * 128
     for i, job in enumerate(jobs):
-        log(f"{erase}    {i+1:4d}/{len(jobs)}: translate: {best.heading[0]:3d},{best.heading[1]:3d} angle:{best.angle:7.4f} score: {best.score:.5g}       ")
+        log(f"{erase}    {i+1:4d}/{len(jobs)}: translate: {best.heading[0]:3d},{best.heading[1]:3d} angle:{best.angle:7.4f} rmse: {best.score:.5g}       ")
         dm, dn, a = job
         m = m0 + dm
         n = n0 + dn
         new = patch.score(tgt, (m, n), a)
-        if new.score > best.score:
+        if new.score < best.score:
             best = new
             j = m
             k = n
@@ -610,69 +658,6 @@ def brute_force_align(
 
     log("\n")
     return best
-
-
-def pad_array(array, radius):
-    assert array.dtype == np.float32, f"Expected np.float32, got {array.dtype}"
-    radius = int(radius + 0.5)
-
-    if array.ndim == 2:
-        return _pad_array_2d(array, radius)
-
-    else:
-        return _pad_array_3d(array, radius)
-
-
-def _pad_array_2d(array, radius):
-
-    M, N = array.shape
-
-    out = np.ones((M + 2 * radius, N + 2 * radius), array.dtype)
-
-    out[radius : radius + M, radius : radius + N] = array
-
-    return out
-
-
-def _pad_array_3d(array, radius):
-
-    M, N, O = array.shape
-
-    out = np.ones((M + 2 * radius, N + 2 * radius, O), array.dtype)
-
-    out[radius : radius + M, radius : radius + N, :] = array
-
-    return out
-
-def unpad_array(array, radius):
-
-    if array.ndim == 2:
-        return _unpad_array_2d(array, radius)
-
-    else:
-        return _unpad_array_3d(array, radius)
-
-
-def _unpad_array_2d(array, radius):
-
-    M, N = array.shape
-
-    return array[
-        radius : radius + M - 2 * radius,
-        radius : radius + N - 2 * radius
-    ]
-
-
-def _unpad_array_3d(array, radius):
-
-    M, N, _ = array.shape
-
-    return array[
-        radius : radius + M - 2 * radius,
-        radius : radius + N - 2 * radius,
-        :
-    ]
-
 
 def log(msg):
 
@@ -989,12 +974,7 @@ def zscore(array, valid):
         return out
 
 def rms_score(t, s):
-
-    #s = sobel_edge_detection(s)
-    #t = sobel_edge_detection(t)
-
-    _max = np.sqrt(np.nanmean(t ** 2.0))
-    return _max - np.sqrt(np.nanmean((t - s) ** 2.0)), t, s
+    return np.sqrt(np.nanmean((t - s) ** 2.0)), t, s
 
 def xcorr_score(p, t):
     '''
@@ -1088,10 +1068,10 @@ def apply_alignment(image_array, delta_m, delta_n, angle, rotation_pos):
     # 1. Translation.
     M, N = image_array.shape[:2]  # Handle grayscale or color images.
     translation_matrix = np.float32([[1, 0, delta_n], [0, 1, delta_m]])
-    translated_image = cv2.warpAffine(image_array, translation_matrix, (M, N))
+    translated_image = cv2.warpAffine(image_array, translation_matrix, (M, N), borderMode=cv2.BORDER_REPLICATE)
 
     # 2. Rotation.
     rotation_matrix = cv2.getRotationMatrix2D(rotation_pos, angle, 1)  # Rotate around the center.
-    rotated_image = cv2.warpAffine(translated_image, rotation_matrix, (M, N))
+    rotated_image = cv2.warpAffine(translated_image, rotation_matrix, (M, N), borderMode=cv2.BORDER_REPLICATE)
 
     return rotated_image
