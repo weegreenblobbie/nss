@@ -10,6 +10,8 @@ import scipy.ndimage
 import scipy.special
 from scipy.signal import convolve2d
 
+# pybind11 squash function.
+from .utils_cpp import squash_cpp
 
 @dataclass(kw_only=True)
 class Circle:
@@ -448,7 +450,7 @@ def mask_circle(image_array, circle, pad=3, outside=0.0, inside=1.0):
     return image_array * mask
 
 
-def squash(array, circle, size):
+def squash_orig(array, circle, size):
     """
     Applies a sliding window to an image, mapping the center pixel to a sigmoid value
     based on its sorted rank within the window.
@@ -527,6 +529,48 @@ def squash(array, circle, size):
     array /= np.nanmax(array)
     return array
 
+def squash(array, circle, size):
+    """
+    Optimized version of the squash function with np.nan mask and correct float comparison.
+    """
+
+    if size % 2 == 0:
+        raise ValueError("Window size must be odd.")
+
+    # Median filtering, helps reduce the noise.
+    array = cv2.medianBlur(array, 3)
+    array = cv2.medianBlur(array, 3)
+    array = cv2.medianBlur(array, 3)
+
+    center_m, center_n, radius = circle.to_int()
+    width = 2 * radius + 1
+    s2 = size // 2
+
+    # Create mask using numpy, initialized with np.nan.
+    mask = np.zeros_like(array) * np.nan
+
+    # Draw a white circle on the mask.
+    x, y = center_n, center_m
+    cv2.circle(mask, (x, y), radius, 1.0, -1)  # -1 fills the circle.
+
+    M0 = center_m - radius - s2
+    M1 = M0 + width + size - 1
+    N0 = center_n - radius - s2
+    N1 = N0 + width + size - 1
+
+    output = squash_cpp(array * mask , center_m, center_n, radius, size)
+
+    # Write output back into array.
+    m0_out = center_m - radius
+    m1_out = m0_out + output.shape[0]
+    n0_out = center_n - radius
+    n1_out = n0_out + output.shape[1]
+    array[m0_out:m1_out, n0_out:n1_out] = output
+
+    array -= np.nanmin(array)
+    array /= np.nanmax(array)
+
+    return array
 
 def blur_normalize(array, size):
 
@@ -599,11 +643,17 @@ def align_moon_images(target, source, target_circle, source_circle):
     target = mask_circle(target, target_circle, 2*pad)
     source = mask_circle(source, source_circle, 2*pad)
 
-    with timeit():
+    with timeit("Squashing target "):
         target = squash(target, target_circle, 101)
 
-    with timeit():
-        source = squash(source, source_circle, 101)
+    #with timeit("Squashing source "):
+    #    source = squash(source, source_circle, 101)
+
+    plt.figure()
+    imshow(target)
+    plt.title("target")
+    plt.show()
+    xxxxxx
 
     return brute_force_align(
         src,

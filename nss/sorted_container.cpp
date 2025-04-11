@@ -1,28 +1,43 @@
 #include <cmath>
 #include <stdexcept>
+#include <sstream>
+#include <string>
+#include <iostream>
 
 #include "sorted_container.hpp"
 
-void
-SortedContainer::push(float x)
+namespace nss
 {
-    if (std::isnan(x)) return;
-    _data.insert(x);
+
+void
+SortedContainer::push(const Pixel & pixel)
+{
+    if (!std::isfinite(pixel.value)) return;
+
+    std::cout << "    push(" << pixel.m << ", " << pixel.n << ")\n";
+    _data.insert(pixel);
 }
 
 void
-SortedContainer::pop(float x) 
+SortedContainer::pop(const Pixel & pixel) 
 {
-    if (std::isnan(x)) return;
-
-    auto it = _data.find(x);
-    if (it != _data.end()) 
+    std::cout << "    pop(" << pixel.m << ", " << pixel.n << ")";
+    if (!std::isfinite(pixel.value))
+    {
+        std::cout << "\n";
+        return;
+    }
+    auto it = std::find(_data.begin(), _data.end(), pixel);
+    if (it != _data.end())
     {
         _data.erase(it);
-    } 
-    else 
+        std::cout << " erased!\n";
+    }
+    else
     {
-        throw std::out_of_range("Value not found in container.");
+        std::stringstream ss;
+        ss << "pop(" << pixel.m << ", " << pixel.n << "): Pixel wasn't found.";
+        throw make_out_of_range(__FILE__, __LINE__, ss.str());
     }
 }
 
@@ -31,9 +46,9 @@ SortedContainer::min_value() const
 {
     if (_data.empty()) 
     {
-        throw std::out_of_range("Container is empty.");
+        throw make_out_of_range(__FILE__, __LINE__, "Container is empty.");
     }
-    return *_data.begin();
+    return _data.begin()->value;
 }
 
 float
@@ -41,9 +56,9 @@ SortedContainer::max_value() const
 {
     if (_data.empty()) 
     {
-        throw std::out_of_range("Container is empty.");
+        throw make_out_of_range(__FILE__, __LINE__, "Container is empty.");
     }
-    return *_data.rbegin();
+    return _data.rbegin()->value;
 }
 
 bool
@@ -51,3 +66,13 @@ SortedContainer::empty() const
 {
     return _data.empty();
 }
+
+std::out_of_range
+make_out_of_range(const char* file, int line, const std::string& message)
+{
+    std::stringstream ss;
+    ss << file << "(" << line << "): " << message;
+    return std::out_of_range(ss.str());
+}
+
+} // nss namespace
