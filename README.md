@@ -1,5 +1,11 @@
 # Nick's Star Stacker
 
+# Building the pybind11 module
+
+```
+python build.py build_ext --build-lib nss --inplace
+```
+
 # Example Usage
 
 Make a python virtual env and install the requirements.

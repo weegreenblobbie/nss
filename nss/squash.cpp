@@ -3,13 +3,12 @@
 #include <cmath>
 #include <stdexcept>
 #include <iostream>
-#include "sorted_container.hpp" // Assuming SortedContainer is in sorted_container.hpp
 
 namespace py = pybind11;
 
 using std::cout;
 
-py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array::forcecast> array_in,
+py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array::forcecast> & array_in,
                              int center_m, int center_n, int radius, int size) 
 {
     const auto array = array_in.unchecked();
@@ -19,80 +18,24 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
     const int m0 = center_m - radius - s2;
     const int n0 = center_n - radius - s2;
 
-    // cout << "center_m: " << center_m << ", center_n: " << center_n << "\n";
-    // cout << "radius: " << radius << ", size: " << size << ", width: " << width << "\n";
-    // cout << "m0: " << m0 << ", n0: " << n0 << "\n";
-
     auto output_array = py::array_t<float, py::array::c_style>(std::vector<size_t>{static_cast<size_t>(width), static_cast<size_t>(width)});
     auto output = output_array.mutable_unchecked();
 
-    nss::SortedContainer window;
+    std::vector<float> window;
+    window.reserve(size * size);
 
     int m = 0;
     int n = 0;
     int m_direction = 1;
 
+    int last_n = -1;
+    const std::string erase = "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
     while (n < width) 
     {
-        cout << "m,n: " << m << ", " << n << ": ";
-
-        // Initially fill the window with pixel values from the array.
-        if (m == 0 && n == 0)
+        if (last_n != n && n  % 10 == 0)
         {
-            cout << "push(:,:)\n";
-            for (int i = 0; i < size; ++i) 
-            {
-                for (int j = 0; j < size; ++j) 
-                {
-                    window.push({m0 + i, n0 + j, array(m0 + i, n0 + j)});
-                }
-            }
-        }
-        // Sliding the window down one row.
-        else if (m_direction == 1 && m > 0) 
-        {
-            cout << "pop(" << m0 + m - 1 << ", :), push(" << m0 + m + size - 1 << ", :)\n";
-            for (int j = 0; j < size; ++j) 
-            {
-                // Pop off old values from the previous row above (-1).
-                window.pop({m0 + m - 1, n0 + n + j, array(m0 + m - 1, n0 + n + j)});
-            }
-            for (int j = 0; j < size; ++j)
-            {
-                // Push on new values from the new row (size - 1).
-                window.push({m0 + m + size - 1, n0 + n + j, array(m0 + m + size - 1, n0 + n + j)});
-            }
-        } 
-        // Sliding the window up one row.
-        else if (m_direction == -1 && m < width - 1)
-        {
-            cout << "pop(" << m0 + m + size << ", :), push(" << m0 + m << ", :)\n";
-            for (int j = 0; j < size; ++j)
-            {
-                // Pop off the old values from the row below (+1).
-                window.pop({m0 + m + size, n0 + n + j, array(m0 + m + size, n0 + n + j)});
-            }
-            for (int j = 0; j < size; ++j)
-            {
-                // Push on new values from the the row above (size + 1)
-                window.push({m0 + m, n0 + n + j, array(m0 + m, n0 + n + j)});
-            }
-        }
-
-        // Sliding the window to the right by one column.
-        else if (n > 0)
-        {
-            cout << "pop(:," << n0 + n - 1 << "), push(:," << n0 + n + size - 1 << ")\n";
-            for (int i = 0; i < size; ++i)
-            {
-                // Pop off old values from the column on the left (-1).
-                window.pop({m0 + m + i, n0 + n - 1, array(m0 + m + i, n0 + n - 1)});
-            }
-            for (int i = 0; i < size; ++i)
-            {
-                // Push on new values from the column on the right (size - 1).
-                window.push({m0 + m + i, n0 + n + size - 1, array(m0 + m + i, n0 + n + size - 1)});
-            }
+            cout << erase << n + 1 << "/" << width << ": squashing ..." << std::flush;
+            last_n = n;
         }
 
         // Center pixel in the window.
@@ -100,21 +43,60 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
         const int cn = center_n - radius + n;
         const auto pixel = array(cm, cn);
 
-        if (window.empty()) 
+        if (std::isnan(pixel))
+        {
+            m += m_direction;
+            if (m == width || m == -1) 
+            {
+                m_direction *= -1;
+                m += m_direction;
+                n++;
+            }
+            continue;
+        }
+
+        window.clear();
+
+        for (int i = 0; i < size; ++i)
+        {
+            for (int j = 0; j < size; ++j)
+            {
+                float pix = array(m0 + m + i, m0 + n + j);
+                if (!std::isnan(pix))
+                {
+                    window.push_back(pix);
+                }
+            }
+        }
+
+        float max_val = std::nanf("");
+        float min_val = std::nanf("");
+
+        if (!window.empty())
+        {
+            max_val = window[0];
+            min_val = window[0];
+        }
+
+        for (const float & pixel : window)
+        {
+            if (pixel > max_val) max_val = pixel;
+            if (pixel < min_val) min_val = pixel;
+        }
+
+        if (window.empty())
         {
             output(m, n) = pixel;
         }
-        else 
+        else
         {
-            const float min_val = window.min_value();
-            const float max_val = window.max_value();
             const float mag = max_val - min_val;
 
-            // if (mag < 1e-7) 
-            // {
-            //     output(m, n) = 0.0;
-            // } 
-            // else 
+            if (mag < 1e-7) 
+            {
+                output(m, n) = 0.0;
+            } 
+            else 
             {
                 output(m, n) = (pixel - min_val) / mag;
             }
@@ -128,7 +110,6 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
             m += m_direction;
             n++;
         }
-        cout << "--> m,n: " << m << ", " << n << "\n";
     }
 
     return output_array;

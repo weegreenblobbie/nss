@@ -25,7 +25,6 @@ setup(
         Extension(
             "utils_cpp",
             [
-                "nss/sorted_container.cpp",
                 "nss/squash.cpp",
             ],
             include_dirs=[

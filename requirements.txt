@@ -3,6 +3,7 @@ ipython
 pillow
 matplotlib
 numpy
+pybind11
 scipy
 scikit-image
 tifffile

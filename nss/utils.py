@@ -572,6 +572,7 @@ def squash(array, circle, size):
 
     return array
 
+
 def blur_normalize(array, size):
 
     convolve2d = scipy.signal.fftconvolve
@@ -646,14 +647,8 @@ def align_moon_images(target, source, target_circle, source_circle):
     with timeit("Squashing target "):
         target = squash(target, target_circle, 101)
 
-    #with timeit("Squashing source "):
-    #    source = squash(source, source_circle, 101)
-
-    plt.figure()
-    imshow(target)
-    plt.title("target")
-    plt.show()
-    xxxxxx
+    with timeit("Squashing source "):
+        source = squash(source, source_circle, 101)
 
     return brute_force_align(
         src,
