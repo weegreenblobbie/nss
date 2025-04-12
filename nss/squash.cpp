@@ -8,8 +8,13 @@ namespace py = pybind11;
 
 using std::cout;
 
-py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array::forcecast> & array_in,
-                             int center_m, int center_n, int radius, int size) 
+py::array_t<float>
+squash_cpp(
+    py::array_t<float, py::array::c_style | py::array::forcecast> & array_in,
+    int center_m,
+    int center_n,
+    int radius,
+    int size) 
 {
     const auto array = array_in.unchecked();
 
@@ -20,9 +25,6 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
 
     auto output_array = py::array_t<float, py::array::c_style>(std::vector<size_t>{static_cast<size_t>(width), static_cast<size_t>(width)});
     auto output = output_array.mutable_unchecked();
-
-    std::vector<float> window;
-    window.reserve(size * size);
 
     int m = 0;
     int n = 0;
@@ -55,7 +57,8 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
             continue;
         }
 
-        window.clear();
+        float max_val = std::nanf("");
+        float min_val = std::nanf("");
 
         for (int i = 0; i < size; ++i)
         {
@@ -64,27 +67,15 @@ py::array_t<float> squash_cpp(py::array_t<float, py::array::c_style | py::array:
                 float pix = array(m0 + m + i, m0 + n + j);
                 if (!std::isnan(pix))
                 {
-                    window.push_back(pix);
+                    if (std::isnan(max_val)) max_val = pix;
+                    if (std::isnan(min_val)) min_val = pix;
+                    if (pix > max_val) max_val = pix;
+                    if (pix < min_val) min_val = pix;
                 }
             }
         }
 
-        float max_val = std::nanf("");
-        float min_val = std::nanf("");
-
-        if (!window.empty())
-        {
-            max_val = window[0];
-            min_val = window[0];
-        }
-
-        for (const float & pixel : window)
-        {
-            if (pixel > max_val) max_val = pixel;
-            if (pixel < min_val) min_val = pixel;
-        }
-
-        if (window.empty())
+        if (std::isnan(max_val))
         {
             output(m, n) = pixel;
         }
