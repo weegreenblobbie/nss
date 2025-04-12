@@ -26,61 +26,37 @@ squash_cpp(
     auto output_array = py::array_t<float, py::array::c_style>(std::vector<size_t>{static_cast<size_t>(width), static_cast<size_t>(width)});
     auto output = output_array.mutable_unchecked();
 
-    int m = 0;
-    int n = 0;
-    int m_direction = 1;
-
-    int last_n = -1;
-    const std::string erase = "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
-    while (n < width) 
+    for (int n = 0; n < width; ++n)
     {
-        if (last_n != n && n  % 10 == 0)
+        for (int m = 0; m < width; ++m)
         {
-            cout << erase << n + 1 << "/" << width << ": squashing ..." << std::flush;
-            last_n = n;
-        }
+            // Center pixel in the window.
+            const int cm = center_m - radius + m;
+            const int cn = center_n - radius + n;
+            const auto pixel = array(cm, cn);
 
-        // Center pixel in the window.
-        const int cm = center_m - radius + m;
-        const int cn = center_n - radius + n;
-        const auto pixel = array(cm, cn);
+            // If the pixel in the middle is nan, no action is needed.
+            if (std::isnan(pixel)) continue;
 
-        if (std::isnan(pixel))
-        {
-            m += m_direction;
-            if (m == width || m == -1) 
+            float max_val = std::nanf("");
+            float min_val = std::nanf("");
+
+            // Find the min and max pixel values in this sub-window.
+            for (int i = 0; i < size; ++i)
             {
-                m_direction *= -1;
-                m += m_direction;
-                n++;
-            }
-            continue;
-        }
-
-        float max_val = std::nanf("");
-        float min_val = std::nanf("");
-
-        for (int i = 0; i < size; ++i)
-        {
-            for (int j = 0; j < size; ++j)
-            {
-                float pix = array(m0 + m + i, m0 + n + j);
-                if (!std::isnan(pix))
+                for (int j = 0; j < size; ++j)
                 {
-                    if (std::isnan(max_val)) max_val = pix;
-                    if (std::isnan(min_val)) min_val = pix;
-                    if (pix > max_val) max_val = pix;
-                    if (pix < min_val) min_val = pix;
+                    const float pix = array(m0 + m + i, m0 + n + j);
+                    if (!std::isnan(pix))
+                    {
+                        if (std::isnan(max_val)) max_val = pix;
+                        if (std::isnan(min_val)) min_val = pix;
+                        if (pix > max_val) max_val = pix;
+                        if (pix < min_val) min_val = pix;
+                    }
                 }
             }
-        }
 
-        if (std::isnan(max_val))
-        {
-            output(m, n) = pixel;
-        }
-        else
-        {
             const float mag = max_val - min_val;
 
             if (mag < 1e-7) 
@@ -91,15 +67,6 @@ squash_cpp(
             {
                 output(m, n) = (pixel - min_val) / mag;
             }
-        }
-
-        m += m_direction;
-
-        if (m == width || m == -1) 
-        {
-            m_direction *= -1;
-            m += m_direction;
-            n++;
         }
     }
 

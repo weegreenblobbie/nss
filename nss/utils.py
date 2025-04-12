@@ -644,10 +644,11 @@ def align_moon_images(target, source, target_circle, source_circle):
     target = mask_circle(target, target_circle, 2*pad)
     source = mask_circle(source, source_circle, 2*pad)
 
-    with timeit("Squashing target "):
+    log("Squashing images before alignment\n")
+    with timeit("Squashing target"):
         target = squash(target, target_circle, 101)
 
-    with timeit("Squashing source "):
+    with timeit("Squashing source"):
         source = squash(source, source_circle, 101)
 
     return brute_force_align(
@@ -734,8 +735,7 @@ def zscore(array, valid):
 class timeit(object):
 
     def __init__(self, msg=None):
-        if msg:
-            log(msg)
+        self._msg = msg
 
     def __enter__(self):
         self.d0 = datetime.datetime.now()
@@ -747,7 +747,8 @@ class timeit(object):
             delta = str(delta)
         else:
             delta = "%.2f seconds" % total_seconds
-        log(f"took {delta}\n")
+        msg = f"{self._msg} " if self._msg else ""
+        log(f"{msg}took {delta}\n")
 
 
 class Aligned(object):
