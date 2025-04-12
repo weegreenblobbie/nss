@@ -8,7 +8,7 @@ namespace py = pybind11;
 
 using std::cout;
 
-py::array_t<float>
+void
 squash_cpp(
     py::array_t<float, py::array::c_style | py::array::forcecast> & array_in,
     int center_m,
@@ -16,14 +16,18 @@ squash_cpp(
     int radius,
     int size) 
 {
-    const auto array = array_in.unchecked();
+    auto & array = array_in.mutable_unchecked();
 
     const int width = 2 * radius + 1;
     const int s2 = size / 2;
     const int m0 = center_m - radius - s2;
     const int n0 = center_n - radius - s2;
+    const std::vector<std::size_t> shape {
+        static_cast<std::size_t>(width),
+        static_cast<std::size_t>(width)
+    };
 
-    auto output_array = py::array_t<float, py::array::c_style>(std::vector<size_t>{static_cast<size_t>(width), static_cast<size_t>(width)});
+    auto output_array = py::array_t<float, py::array::c_style>(shape);
     auto output = output_array.mutable_unchecked();
 
     for (int n = 0; n < width; ++n)
@@ -31,8 +35,9 @@ squash_cpp(
         for (int m = 0; m < width; ++m)
         {
             // Center pixel in the window.
-            const int cm = center_m - radius + m;
-            const int cn = center_n - radius + n;
+            const int cm = m0 + m + s2;
+            const int cn = n0 + n + s2;
+
             const auto pixel = array(cm, cn);
 
             // If the pixel in the middle is nan, no action is needed.
@@ -46,7 +51,7 @@ squash_cpp(
             {
                 for (int j = 0; j < size; ++j)
                 {
-                    const float pix = array(m0 + m + i, m0 + n + j);
+                    const float pix = array(m0 + m + i, n0 + n + j);
                     if (!std::isnan(pix))
                     {
                         if (std::isnan(max_val)) max_val = pix;
@@ -70,7 +75,18 @@ squash_cpp(
         }
     }
 
-    return output_array;
+    // Write output back into array.
+    const int m0_out = center_m - radius;
+    const int n0_out = center_n - radius;
+    for (int n = 0; n < width; ++n)
+    {
+        for (int m = 0; m < width; ++m)
+        {
+            array(m0_out + m, n0_out + n) = output(m, n);
+        }
+    }
+
+    // return output_array;
 }
 
 PYBIND11_MODULE(utils_cpp, m) 

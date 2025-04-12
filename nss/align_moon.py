@@ -51,6 +51,7 @@ coarse parameters at the starting location
 '''
 
 import argparse
+import copy
 import datetime
 import os
 import pickle
@@ -75,8 +76,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import tifffile
-import tifffile.tifffile
-from tifffile.tifffile import imread, imwrite
+import tifffile
+from tifffile import imwrite
+from tifffile import TiffFile
 
 from nss import utils
 
@@ -162,14 +164,15 @@ def main():
 
     with utils.timeit("Reading images ...\n"):
         utils.log(f"    Target: {target_fn}\n")
-        target = imread(target_fn).astype(np.float32)
+        with TiffFile(target_fn) as tif:
+            target = tif.asarray().astype(np.float32)
+            target_tags = tif.pages[0].tags
         utils.log(f"    Source: {source_fn}\n")
-        source = imread(source_fn).astype(np.float32)
-
-        # TODO: mask source image.
-        #if mask_fn:
-        #    mask = imread(mask_fn).astype(np.float32)
-        #    mask = mask[:,:, 0]
+        with TiffFile(source_fn) as tif:
+            source = tif.asarray().astype(np.float32)
+            colormap = tif.pages.first.colormap
+            photometric = tif.pages.first.photometric
+            iccprofile = tif.pages.first.iccprofile
 
     assert target.shape == source.shape, f"Image shapes don't match, can not align: {target.shape} != {source.shape}"
 
@@ -212,7 +215,13 @@ def main():
         aligned /= np.nanmax(aligned)
         aligned *= (1 << 16) -1
         aligned = aligned.astype(np.uint16)
-        imwrite(output_fn, aligned, photometric="rgb")
+
+        imwrite(output_fn, aligned,
+            photometric=photometric,
+            colormap=colormap,
+            iccprofile=iccprofile,
+            software="https://github.com/weegreenblobbie/nss",
+        )
 
 
 if __name__ == "__main__":

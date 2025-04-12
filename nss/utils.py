@@ -525,8 +525,7 @@ def squash_orig(array, circle, size):
     n0 = center_n - radius
     n1 = n0 + output.shape[1]
     array[m0:m1, n0:n1] = output
-    array -= np.nanmin(array)
-    array /= np.nanmax(array)
+
     return array
 
 def squash(array, circle, size):
@@ -553,22 +552,9 @@ def squash(array, circle, size):
     x, y = center_n, center_m
     cv2.circle(mask, (x, y), radius, 1.0, -1)  # -1 fills the circle.
 
-    M0 = center_m - radius - s2
-    M1 = M0 + width + size - 1
-    N0 = center_n - radius - s2
-    N1 = N0 + width + size - 1
+    array *= mask
 
-    output = squash_cpp(array * mask , center_m, center_n, radius, size)
-
-    # Write output back into array.
-    m0_out = center_m - radius
-    m1_out = m0_out + output.shape[0]
-    n0_out = center_n - radius
-    n1_out = n0_out + output.shape[1]
-    array[m0_out:m1_out, n0_out:n1_out] = output
-
-    array -= np.nanmin(array)
-    array /= np.nanmax(array)
+    squash_cpp(array, center_m, center_n, radius, size)
 
     return array
 
@@ -641,15 +627,32 @@ def align_moon_images(target, source, target_circle, source_circle):
     source -= np.nanmin(source)
     source /= np.nanmax(source)
 
-    target = mask_circle(target, target_circle, 2*pad)
-    source = mask_circle(source, source_circle, 2*pad)
+    target = mask_circle(target, target_circle, pad)
+    source = mask_circle(source, source_circle, pad)
+
+    # Roughly a window about 1/6 the radius of the moon. 
+    window_size = 99   # rmse 0.18948
+    window_size = 121  # rmse 0.18142 ~ 20 seconds per image to squash.
+    # window_size = 161  # rmse 0.16955 ~ 34 seconds per image to squash.
+    # window_size = 201  # rmse 0.15959 ~ 55 seconds per image to squash.
 
     log("Squashing images before alignment\n")
     with timeit("Squashing target"):
-        target = squash(target, target_circle, 101)
+        target = squash(target, target_circle, window_size)
 
     with timeit("Squashing source"):
-        source = squash(source, source_circle, 101)
+        source = squash(source, source_circle, window_size)
+
+    # plt.figure()
+    # imshow(target)
+    # plt.title("target")
+    # plt.figure()
+    # imshow(source)
+    # plt.title("source")
+    # plt.figure()
+    # imshow(np.sqrt((target - source) ** 2))
+    # plt.title("rmse")
+    # plt.show()
 
     return brute_force_align(
         src,
