@@ -52,35 +52,16 @@ coarse parameters at the starting location
 
 import argparse
 import copy
-import datetime
 import os
-import pickle
 import random
 import sys
-import warnings
-
-import PIL.Image
-import scipy
-import scipy.signal
-import skimage
-
-from scipy import ndimage
-from scipy.signal import fftconvolve
-from scipy.signal import correlate2d
-
-import scipy.ndimage
-from   scipy.ndimage import median_filter as median
-
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-
-import tifffile
-import tifffile
-from tifffile import imwrite
-from tifffile import TiffFile
 
 from nss import utils
+
+def make_aligned_filename(filename):
+    prefix, _ = os.path.splitext(filename)
+    return prefix + "-aligned.tiff"
+
 
 def main():
 
@@ -88,40 +69,38 @@ def main():
 
     parser.add_argument(
         "-c",
-        "--cache",
-        default = None,
-        type = str,
-        help = "Reads a previously computed coarse alignment cache file."
+        "--center",
+        action="store_true",
+        help = "Centers the moon in the target image before aligning."
     )
 
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+
+    group.add_argument(
         "-t",
         "--target",
-        required = True,
+        default = None,
         type = str,
         help = "Specifies the target image that all other images are aligned to"
     )
 
-    parser.add_argument(
-        "-m",
-        "--mask",
-        type = str,
-        help = "Specifies the mask image, pixels that are black are ignored during processing"
+    group.add_argument(
+        "-u",
+        "--use-target-cache",
+        action="store_true",
+        help = "Uses the previously saved target cache."
     )
 
     parser.add_argument(
-        "-o",
-        "--output",
-        type = str,
-        default = None,
-        help = "Specifies the aligned output image name, default is {prefix}-aligned.tiff"
+        "--save-target-cache",
+        action="store_true",
+        help = "Preprocesses the target image and saves the results locally."
     )
 
     parser.add_argument(
         "-p",
         "--plot",
         action = "store_true",
-        default = False,
         help = "plot a summary at the end"
     )
 
@@ -135,6 +114,8 @@ def main():
 
     parser.add_argument(
         "source",
+        default = None,
+        nargs = "?",
         type = str,
         help = "the source image to be aligned with the target"
     )
@@ -143,50 +124,67 @@ def main():
 
     target_fn = args.target
     source_fn = args.source
-    mask_fn   = args.mask
-    coarse_cache_fn = args.cache
-    output_fn = args.output
 
-    assert os.path.isfile(target_fn), "Could not find file " + target_fn
-    assert os.path.isfile(source_fn), "Could not find file " + source_fn
+    if args.target and args.source:
+        assert target_fn != source_fn, "Target and Source are the same file!"
 
-    assert target_fn != source_fn, "Target and Source are the same file!"
+    if args.use_target_cache:
+        assert args.save_target_cache is False
 
-    if mask_fn:
-        assert os.path.isfile(mask_fn), "Could not find file " + mask_fn
-
-    if output_fn is None:
-        path = os.path.dirname(source_fn)
-        prefix = os.path.splitext(os.path.basename(source_fn))[0]
-        output_fn = os.path.join(path, prefix + "-aligned.tiff")
-
-    mask = None
+    if args.save_target_cache:
+        assert args.use_target_cache is False
 
     with utils.timeit("Reading images ...\n"):
-        utils.log(f"    Target: {target_fn}\n")
-        with TiffFile(target_fn) as tif:
-            target = tif.asarray().astype(np.float32)
-            target_tags = tif.pages[0].tags
-        utils.log(f"    Source: {source_fn}\n")
-        with TiffFile(source_fn) as tif:
-            source = tif.asarray().astype(np.float32)
-            colormap = tif.pages.first.colormap
-            photometric = tif.pages.first.photometric
-            iccprofile = tif.pages.first.iccprofile
 
-    assert target.shape == source.shape, f"Image shapes don't match, can not align: {target.shape} != {source.shape}"
+        if args.use_target_cache:
+            target = utils.TiffFile()
+            data = utils.read_dict("target.pkl")
+            target.array = data["array"]
+            target_circle = data["circle"]
+            target_fn = data["target_fn"]
+        else:
+            target = utils.TiffFile().read(target_fn)
 
-    with utils.timeit("Detecting moon in target ... "):
-        # TODO: read target location from cache.
-        target_circle = utils.detect_moon(target, args.size, plot=args.plot)
-        utils.log(f"{target_circle} ")
-        if args.plot:
-            plt.title("Target Image")
+        print(f"    Target: {target_fn}")
+        if not args.save_target_cache:
+            print(f"    Source: {source_fn}")
+            source = utils.TiffFile().read(source_fn)
 
-    with utils.timeit("Detecting moon in source ... "):
-        # TODO: read target location from cache.
-        source_circle = utils.detect_moon(source, args.size, plot=args.plot)
-        utils.log(f"{source_circle} ")
+    if not args.use_target_cache:
+        with utils.timeit("Detecting moon in target: "):
+            target_circle = utils.detect_moon(target.array, args.size, plot=args.plot)
+            print(f"Target: {target_circle}")
+            if args.plot:
+                plt.title("Target Image")
+
+        if args.center:
+            M, N = target.array.shape[0:2]
+            delta_m = M / 2.0 - target_circle.center[0]
+            delta_n = N / 2.0 - target_circle.center[1]
+            target.array = utils.apply_alignment(target.array, delta_m, delta_n, 0.0, target_circle.center)
+            target_circle = utils.Circle(center=(M / 2.0, N / 2.0), radius=target_circle.radius)
+            centered_fn = make_aligned_filename(target_fn)
+            target.saveas(centered_fn)
+            print(f"Wrote centered target: {centered_fn}")
+
+    else:
+        print("Detected moon in target:")
+        print(f"Target: {target_circle}")
+
+    # TODO: Derive this from the detected moon radius.
+    window_size = 101
+
+    if args.save_target_cache:
+        utils.log("Preprocessing target image: ")
+        target.array = utils.align_moon_image_preprocess(target.array, target_circle, window_size, "target")
+        utils.save_dict("target.pkl", dict(array=target.array, circle=target_circle, target_fn=target_fn))
+        print("Wrote target.pkl")
+        utils.log("Quitting caching target data.")
+        return
+
+    with utils.timeit("Detecting moon in source: "):
+        source_circle = utils.detect_moon(source.array, args.size, plot=args.plot)
+        print(f"Source: {source_circle}")
         if args.plot:
             plt.title("Source Image")
 
@@ -197,10 +195,12 @@ def main():
 
     with utils.timeit("Aligning images\n"):
         alignment = utils.align_moon_images(
-            target,
-            source,
+            target.array,
+            source.array,
             target_circle,
-            source_circle
+            source_circle,
+            window_size,
+            target_preprocessed=args.use_target_cache,
         )
         print(f"final score: {alignment.score:.5g}")
 
@@ -208,21 +208,11 @@ def main():
     delta_m, delta_n = alignment.heading
     angle = round(alignment.angle, 4)
     print(f"Applying:\n    translate: {delta_m},{delta_n}, rotate: {angle}")
-    aligned = utils.apply_alignment(source, delta_m, delta_n, angle, target_circle.center)
+    source.array = utils.apply_alignment(source.array, delta_m, delta_n, angle, target_circle.center)
 
+    output_fn = make_aligned_filename(source_fn)
     with utils.timeit(f"Saving {output_fn} ... "):
-        aligned -= np.nanmin(aligned)
-        aligned /= np.nanmax(aligned)
-        aligned *= (1 << 16) -1
-        aligned = aligned.astype(np.uint16)
-
-        imwrite(output_fn, aligned,
-            photometric=photometric,
-            colormap=colormap,
-            iccprofile=iccprofile,
-            software="https://github.com/weegreenblobbie/nss",
-        )
-
+        source.saveas(output_fn)
 
 if __name__ == "__main__":
     main()

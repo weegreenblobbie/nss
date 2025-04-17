@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import datetime
+import pickle
 import sys
 import warnings
 
@@ -10,8 +11,57 @@ import scipy.ndimage
 import scipy.special
 from scipy.signal import convolve2d
 
-# pybind11 squash function.
-from .utils_cpp import squash_cpp
+import tifffile
+from tifffile import imwrite as tf_imwrite
+from tifffile import TiffFile as tf_TiffFile
+
+try:
+    # pybind11 squash function.
+    from .utils_cpp import squash_cpp
+except ImportError:
+    squash_cpp = None
+
+class TiffFile:
+    def __init__(self):
+        self._filename = None
+        self._array = None
+        self._colormap = None
+        self._photometric = None
+        self._iccprofile = None
+
+    @property
+    def array(self):
+        return self._array
+    
+    @array.setter
+    def array(self, new_array):
+        self._array = new_array
+
+    def read(self, filename):
+        self._filename = filename
+        with tf_TiffFile(filename) as fin:
+            self._array = fin.asarray().astype(np.float32)
+            self._array -= np.min(self._array)
+            self._array /= np.max(self._array)
+            self._colormap = fin.pages.first.colormap
+            self._photometric = fin.pages.first.photometric
+            self._iccprofile = fin.pages.first.iccprofile
+        return self
+
+    def saveas(self, filename):
+        out = self._array - np.nanmin(self._array)
+        out /= np.nanmax(out)
+        out *= (1 << 16) -1
+        out = out.astype(np.uint16)
+        tf_imwrite(
+            filename,
+            out,
+            photometric=self._photometric,
+            colormap=self._colormap,
+            iccprofile=self._iccprofile,
+            software="https://github.com/weegreenblobbie/nss"
+        )
+
 
 @dataclass(kw_only=True)
 class Circle:
@@ -32,6 +82,15 @@ class Circle:
         dr = self.radius - other.radius
         return Circle(center=(dm, dn), radius=dr)
 
+
+def save_dict(filename, data):
+    with open(filename, 'wb') as fout:
+        pickle.dump(data, fout)
+
+
+def read_dict(filename):
+    with open(filename, 'rb') as fin:
+        return pickle.load(fin)
 
 def _gaus2d(x=0.0, y=0.0, mx=0.0, my=0.0, sx=1.0, sy=1.0):
     return np.exp(-((x - mx)**2.0 / (2.0 * sx**2.0) + (y - my)**2.0 / (2.0 * sy**2.0)))
@@ -333,8 +392,8 @@ def fit_circle(points):
     """
 
     points = np.array(points)
-    if len(points) < 3:  # Need at least 3 points to fit a circle.
-        return None
+    if len(points) < 3:
+        raise ValueError("Need at least 3 points to fit a circle")
 
     x = points[:, 0]
     y = points[:, 1]
@@ -343,13 +402,9 @@ def fit_circle(points):
     A = np.column_stack((2 * x, 2 * y, np.ones_like(x)))
     b = x**2 + y**2
 
-    try:
-        center_x, center_y, c = np.linalg.lstsq(A, b, rcond=None)[0]
-        radius = np.sqrt(center_x**2 + center_y**2 + c)
-        return center_x, center_y, radius
-    except np.linalg.LinAlgError:
-        # Handle cases where the least-squares fit fails.
-        return None
+    center_x, center_y, c = np.linalg.lstsq(A, b, rcond=None)[0]
+    radius = np.sqrt(center_x**2 + center_y**2 + c)
+    return center_x, center_y, radius
 
 
 def detect_moon(image, grid_size=200, plot=False):
@@ -361,7 +416,6 @@ def detect_moon(image, grid_size=200, plot=False):
 
         grid_size (int): The size of the grid patches used to detect the moon's
                          edge.
-
     Returns:
         m, n, r (float): The detected moon's center and radius.
     """
@@ -411,8 +465,6 @@ def detect_moon(image, grid_size=200, plot=False):
 
     raw_points = list(raw_points)
 
-    #np.random.shuffle(raw_points)
-    #raw_points = raw_points[:100]
     m, n, r = fit_circle(raw_points)
 
     if plot:
@@ -533,6 +585,11 @@ def squash(array, circle, size):
     Optimized version of the squash function with np.nan mask and correct float comparison.
     """
 
+    if squash_cpp is None:
+        print("Falling back to python squash. To build the c++ module, run "
+          "'python build.py build_ext --build-lib nss --inplace'")
+        return squash_orig(array, circle, size)
+
     if size % 2 == 0:
         raise ValueError("Window size must be odd.")
 
@@ -573,7 +630,16 @@ def blur_normalize(array, size):
     return array
 
 
-def align_moon_images(target, source, target_circle, source_circle):
+def align_moon_image_preprocess(array, circle, window_size, label):
+    assert array.dtype == np.float32
+    assert array.ndim == 3
+    array = to_gray(array)
+    array = mask_circle(array, circle, pad=3)
+    with timeit(f"Squashing {label}"):
+        return squash(array, circle, window_size)
+
+
+def align_moon_images(target, source, target_circle, source_circle, window_size, target_preprocessed):
     """
     Align the source to the target using the detected circles as the starting
     point.
@@ -581,14 +647,17 @@ def align_moon_images(target, source, target_circle, source_circle):
     Returns the heading and rotation to apply on source to be aligned with
     target.
     """
-    assert target.dtype == np.float32
-    assert source.dtype == np.float32
-    assert target.ndim == 3
-    assert source.ndim == 3
-    assert target.shape == source.shape
+    if not target_preprocessed:
+        assert target.dtype == np.float32
+        assert target.ndim == 3
+        assert target.shape == source.shape
+        log("Squashing target: ")
+        target = align_moon_image_preprocess(target, target_circle, window_size, "target")
 
-    target = to_gray(target)
-    source = to_gray(source)
+    assert source.dtype == np.float32   
+    assert source.ndim == 3
+    log("Squashing source: ")
+    source = align_moon_image_preprocess(source, source_circle, window_size, "source")
 
     center_m, center_n, r = source_circle.to_int()
 
@@ -600,6 +669,8 @@ def align_moon_images(target, source, target_circle, source_circle):
     # source image.
     src_m0, src_n0, src_r = source_circle.to_int()
     tgt_m0, tgt_n0, tgt_r = target_circle.to_int()
+
+    pad = max(3, abs(src_r - tgt_r))
 
     off_m, off_n, _ = delta.to_int()
 
@@ -619,30 +690,6 @@ def align_moon_images(target, source, target_circle, source_circle):
     print(f"Target: pos: {tgt_pos[0]},{tgt_pos[1]}, radius: {tgt_r}")
     print(f"Source: pos: {m0},{n0}, radius: {src_r}")
 
-    pad = int(max(3, abs(target_circle.radius - source_circle.radius)) + 0.5)
-
-    target -= np.nanmin(target)
-    target /= np.nanmax(target)
-
-    source -= np.nanmin(source)
-    source /= np.nanmax(source)
-
-    target = mask_circle(target, target_circle, pad)
-    source = mask_circle(source, source_circle, pad)
-
-    # Roughly a window about 1/6 the radius of the moon. 
-    window_size = 99   # rmse 0.18948
-    window_size = 121  # rmse 0.18142 ~ 20 seconds per image to squash.
-    # window_size = 161  # rmse 0.16955 ~ 34 seconds per image to squash.
-    # window_size = 201  # rmse 0.15959 ~ 55 seconds per image to squash.
-
-    log("Squashing images before alignment\n")
-    with timeit("Squashing target"):
-        target = squash(target, target_circle, window_size)
-
-    with timeit("Squashing source"):
-        source = squash(source, source_circle, window_size)
-
     # plt.figure()
     # imshow(target)
     # plt.title("target")
@@ -659,7 +706,7 @@ def align_moon_images(target, source, target_circle, source_circle):
         target,
         tgt_pos,
         offset,
-        pad
+        pad,
     )
 
 def brute_force_align(
