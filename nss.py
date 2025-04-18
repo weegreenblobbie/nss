@@ -16,6 +16,14 @@ def main():
 
     parser = argparse.ArgumentParser()
 
+    # TODO: make this the default?
+    parser.add_argument(
+        "-c",
+        "--center",
+        action = "store_true",
+        help = "specifies the number of alignment jobs to run simultaneously"
+    )
+
     parser.add_argument(
         "-j",
         "--jobs",
@@ -63,6 +71,13 @@ def main():
 
     num_images = len(images)
 
+    # Preprocess the target image so we don't have to repeat it for each one.
+    cmd = [sys.executable, '-m', 'nss.align_moon', '--save-target-cache', '--target', target]
+    if args.center:
+        cmd += ["--center"]
+    print(f"Launching: {' '.join(cmd)}")
+    subprocess.check_call(cmd)
+
     pool = Pool(processes = args.jobs)
 
     with utils.timeit():
@@ -71,7 +86,7 @@ def main():
 
         jobs = []
         for i, img in enumerate(images):
-            jobs.append((target, img, 'nss-log%02d.txt' % (i + 1)))
+            jobs.append((img, 'nss-log%02d.txt' % (i + 1)))
 
         results = pool.map(align_job, jobs)
 
@@ -87,9 +102,9 @@ def main():
 
 def align_job(args):
 
-    target, image, logfile = args
+    image, logfile = args
 
-    args = [sys.executable, '-m', 'nss.align_moon', '--target', target, image]
+    args = [sys.executable, '-m', 'nss.align_moon', '--use-target-cache', image]
 
     utils.log("Launching job: {}\n    logfile: {}\n".format(' '.join(args), logfile))
 
