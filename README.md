@@ -1,9 +1,26 @@
 # Nick's Star Stacker
 
+# Setting up the virtual environment
+
+```
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
 # Building the pybind11 module
 
 ```
 python build.py build_ext --build-lib nss --inplace
+```
+
+# Center the moon or sun tiff
+```
+python -m nss.center src\path\20250313_232842.99.tif -o centered\20250313_232842.99.tif
+
+python -m nss.center "D:\tmp_export\eclipse-2024\20240408_134044.79-Enhanced-NR.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_134044.79-Enhanced-NR.tif"
+python -m nss.center -p "D:\tmp_export\eclipse-2024\20240408_134010.84.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_134010.84.tif"
+python -m nss.center -p "D:\tmp_export\eclipse-2024\20240408_132133.04.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_132133.04.tif"
 ```
 
 # Example Usage

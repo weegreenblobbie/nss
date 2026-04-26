@@ -3,7 +3,9 @@ ipython
 pillow
 matplotlib
 numpy
+opencv-python
 pybind11
+setuptools
 scipy
 scikit-image
 tifffile

@@ -1164,10 +1164,10 @@ def apply_alignment(image_array, delta_m, delta_n, angle, rotation_pos):
     # 1. Translation.
     M, N = image_array.shape[:2]  # Handle grayscale or color images.
     translation_matrix = np.float32([[1, 0, delta_n], [0, 1, delta_m]])
-    translated_image = cv2.warpAffine(image_array, translation_matrix, (M, N), borderMode=cv2.BORDER_REPLICATE)
+    translated_image = cv2.warpAffine(image_array, translation_matrix, (N, M), borderMode=cv2.BORDER_REPLICATE)
 
     # 2. Rotation.
     rotation_matrix = cv2.getRotationMatrix2D(rotation_pos, angle, 1)  # Rotate around the center.
-    rotated_image = cv2.warpAffine(translated_image, rotation_matrix, (M, N), borderMode=cv2.BORDER_REPLICATE)
+    rotated_image = cv2.warpAffine(translated_image, rotation_matrix, (N, M), borderMode=cv2.BORDER_REPLICATE)
 
     return rotated_image
