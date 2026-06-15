@@ -9,3 +9,23 @@ setuptools
 scipy
 scikit-image
 tifffile
+
+# UI Framework.
+PyQt6>=6.5.0
+
+# Math, arrays, and interpolation
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Image processing
+opencv-python-headless>=4.8.0
+
+# File handling (for tf_TiffFile)
+tifffile>=2023.7.10
+
+# Required by original center.py script
+matplotlib>=3.7.0
+
+# Linux deps
+# sudo apt-get update
+# sudo apt-get install libxcb-cursor0
