@@ -1,2 +1,7 @@
 nss-log*
 __pycache__
+venv/
+ai-venv/
+work-in-progress.txt
+tests/test_data/*.png
+

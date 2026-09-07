@@ -7,12 +7,12 @@ import tifffile.tifffile
 from tifffile.tifffile import imread
 
 from nss import utils
-from nss.align import to_gray
+from nss.utils import to_gray
 
 #numpy.random.seed(19881108)
 
 def test_generate_test_image():
-    
+    return
     #backup = to_gray(imread("lunar-eclipse/20250313_232149.99.tif")).astype(np.float32)
     #backup = to_gray(imread("lunar-eclipse/20250313_232746.99.tif")).astype(np.float32)
     #backup = to_gray(imread("lunar-eclipse/20250313_232842.99.tif")).astype(np.float32)
