@@ -22,6 +22,7 @@ from nss.color_math import (
     generate_mutations,
 )
 from nss.history import HistoryManager
+from nss.mru import MruManager
 
 class ImageContainer(QLabel):
     """
@@ -184,6 +185,7 @@ class MainWindow(QMainWindow):
         self.master_image: Optional[np.ndarray] = None
         self.tiff_obj: Optional[TiffFile] = None
         self.history_manager: HistoryManager = HistoryManager()
+        self.mru_manager: MruManager = MruManager()
         self.grid_states: Optional[List[StateNode]] = None
         self.grading_worker: Optional[GradingWorker] = None
 
@@ -198,8 +200,12 @@ class MainWindow(QMainWindow):
         open_action = QAction("&Open...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.setStatusTip("Open a 16-bit TIFF image")
-        open_action.triggered.connect(self.open_file)
+        open_action.triggered.connect(lambda: self.open_file())
         file_menu.addAction(open_action)
+
+        # Recent Directories Submenu
+        self.recent_menu = file_menu.addMenu("Recent &Directories")
+        self.update_recent_directories_menu()
 
         save_action = QAction("&Save As...", self)
         save_action.setShortcut("Ctrl+S")
@@ -284,14 +290,42 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready. Load a 16-bit TIFF image to begin.")
 
-    def open_file(self) -> None:
+    def update_recent_directories_menu(self) -> None:
+        """
+        Clears and repopulates the Recent Directories submenu from MruManager paths.
+        """
+        self.recent_menu.clear()
+        paths = self.mru_manager.get_mru_directories()
+        
+        if not paths:
+            no_recent_action = QAction("No Recent Directories", self)
+            no_recent_action.setEnabled(False)
+            self.recent_menu.addAction(no_recent_action)
+            return
+
+        for i, path in enumerate(paths):
+            action = QAction(f"&{i + 1}: {path}", self)
+            # lambda default parameter binds the loop variable path snapshot locally
+            action.triggered.connect(lambda checked=False, p=path: self.open_file_dialog_at_dir(p))
+            self.recent_menu.addAction(action)
+
+    def open_file_dialog_at_dir(self, start_dir: str) -> None:
+        """
+        Convenience method to trigger the open file dialog at a specific path.
+        """
+        self.open_file(start_dir=start_dir)
+
+    def open_file(self, start_dir: Optional[str] = None) -> None:
         """
         Opens a file dialog to load a 16-bit TIFF file.
         """
+        if start_dir is None:
+            start_dir = self.mru_manager.get_most_recent_directory()
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open 16-bit TIFF",
-            "",
+            start_dir,
             "TIFF Images (*.tif *.tiff);;All Files (*)"
         )
         if file_path:
@@ -300,6 +334,10 @@ class MainWindow(QMainWindow):
                 
                 # Load using the scaling pipeline
                 self.master_image, self.tiff_obj = load_tiff_to_float32(file_path)
+                
+                # Update MRU directories
+                self.mru_manager.add_path(file_path)
+                self.update_recent_directories_menu()
                 
                 # Initialize history with default state
                 self.history_manager.clear()
@@ -322,10 +360,12 @@ class MainWindow(QMainWindow):
         if self.master_image is None or self.tiff_obj is None or self.grid_states is None:
             return
 
+        start_dir = self.mru_manager.get_most_recent_directory()
+
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save 16-bit TIFF",
-            "",
+            start_dir,
             "TIFF Images (*.tif *.tiff);;All Files (*)"
         )
         if save_path:
@@ -339,6 +379,10 @@ class MainWindow(QMainWindow):
                 
                 # Save using the original metadata on tiff_obj
                 self.tiff_obj.saveas(save_path)
+                
+                # Update MRU directories
+                self.mru_manager.add_path(save_path)
+                self.update_recent_directories_menu()
                 
                 self.status_bar.showMessage(f"Successfully saved graded image to {save_path}")
             except Exception as e:
