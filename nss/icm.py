@@ -13,6 +13,7 @@ from scipy.interpolate import splprep, splev, PchipInterpolator
 from PyQt6 import QtWidgets, QtGui, QtCore
 
 from nss import utils
+from nss.tiff_file import TiffFile
 
 
 class CurveEditor(QtWidgets.QWidget):
@@ -498,7 +499,7 @@ def main():
     source_fn = args.source
 
     with utils.timeit("Reading image ...\n"):
-        source = utils.TiffFile().read(source_fn)
+        source = TiffFile().read(source_fn)
         print(f"    Source: {source_fn}")
 
     # Launch the PyQt6 UI and pass the image data to it

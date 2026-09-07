@@ -57,6 +57,7 @@ import random
 import sys
 
 from nss import utils
+from nss.tiff_file import TiffFile
 
 def make_aligned_filename(filename):
     prefix, _ = os.path.splitext(filename)
@@ -137,18 +138,18 @@ def main():
     with utils.timeit("Reading images ...\n"):
 
         if args.use_target_cache:
-            target = utils.TiffFile()
+            target = TiffFile()
             data = utils.read_dict("target.pkl")
             target.array = data["array"]
             target_circle = data["circle"]
             target_fn = data["target_fn"]
         else:
-            target = utils.TiffFile().read(target_fn)
+            target = TiffFile().read(target_fn)
 
         print(f"    Target: {target_fn}")
         if not args.save_target_cache:
             print(f"    Source: {source_fn}")
-            source = utils.TiffFile().read(source_fn)
+            source = TiffFile().read(source_fn)
 
     if not args.use_target_cache:
         with utils.timeit("Detecting moon in target: "):

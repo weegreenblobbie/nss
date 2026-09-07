@@ -59,6 +59,7 @@ import sys
 import matplotlib.pyplot as plt
 
 from nss import utils
+from nss.tiff_file import TiffFile
 
 def make_centered_filename(filename):
     """
@@ -109,7 +110,7 @@ def main():
     source_fn = args.source
 
     with utils.timeit("Reading images ...\n"):
-        source = utils.TiffFile().read(source_fn)
+        source = TiffFile().read(source_fn)
         print(f"    Source: {source_fn}")
 
     with utils.timeit("Detecting moon in source: "):

@@ -11,57 +11,11 @@ import scipy.ndimage
 import scipy.special
 from scipy.signal import convolve2d
 
-import tifffile
-from tifffile import imwrite as tf_imwrite
-from tifffile import TiffFile as tf_TiffFile
-
 try:
     # pybind11 squash function.
     from .utils_cpp import squash_cpp
 except ImportError:
     squash_cpp = None
-
-class TiffFile:
-    def __init__(self):
-        self._filename = None
-        self._array = None
-        self._colormap = None
-        self._photometric = None
-        self._iccprofile = None
-
-    @property
-    def array(self):
-        return self._array
-    
-    @array.setter
-    def array(self, new_array):
-        self._array = new_array
-
-    def read(self, filename):
-        self._filename = filename
-        with tf_TiffFile(filename) as fin:
-            self._array = fin.asarray().astype(np.float32)
-            self._array -= np.min(self._array)
-            self._array /= np.max(self._array)
-            self._colormap = fin.pages.first.colormap
-            self._photometric = fin.pages.first.photometric
-            self._iccprofile = fin.pages.first.iccprofile
-        return self
-
-    def saveas(self, filename):
-        out = self._array - np.nanmin(self._array)
-        out /= np.nanmax(out)
-        out *= (1 << 16) -1
-        out = out.astype(np.uint16)
-        tf_imwrite(
-            filename,
-            out,
-            photometric=self._photometric,
-            colormap=self._colormap,
-            iccprofile=self._iccprofile,
-            software="https://github.com/weegreenblobbie/nss"
-        )
-
 
 @dataclass(kw_only=True)
 class Circle:
