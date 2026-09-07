@@ -32,9 +32,9 @@ This document tracks the implementation progress of the Color Grading Explorer. 
 
 ## Phase 4: Interactivity & State Management
 *Goal: Connect the math to the UI and enable exploration.*
-- [ ] Implement the history list logic to store `StateNode` dictionaries (the Undo/Redo stack).
-- [ ] Wire up the click event on the 8 outer image containers to promote that variation to the center.
-- [ ] On click, push the new center parameters to the history stack and generate 8 new random mutations.
-- [ ] Apply the parameters to the original `float32` master image to render the 9 variations to the screen.
-- [ ] Enable and wire up the Back and Forward buttons to traverse the history stack and re-render the grid.
-- [ ] **TEST:** Write `tests/test_state.py` to verify pushing, undoing, and redoing `StateNode` dictionaries in pure Python lists works correctly. Run `pytest` to confirm.
+- [x] Implement the history list logic to store `StateNode` dictionaries (the Undo/Redo stack).
+- [x] Wire up the click event on the 8 outer image containers to promote that variation to the center.
+- [x] On click, push the new center parameters to the history stack and generate 8 new random mutations.
+- [x] Apply the parameters to the original `float32` master image to render the 9 variations to the screen.
+- [x] Enable and wire up the Back and Forward buttons to traverse the history stack and re-render the grid.
+- [x] **TEST:** Write `tests/test_state.py` to verify pushing, undoing, and redoing `StateNode` dictionaries in pure Python lists works correctly. Run `pytest` to confirm.
