@@ -72,9 +72,13 @@ class MockQSettings:
     def __init__(self, org: str, app: str) -> None:
         self.org = org
         self.app = app
-        # Initial dummy data to match test expectations
+        # Initial dummy data to match test expectations, using platform-normalized absolute paths
+        import os
         self._store = {
-            "mru_directories": ["/dummy/existing/dir1", "/dummy/existing/dir2"]
+            "mru_directories": [
+                os.path.abspath("dummy/existing/dir1"),
+                os.path.abspath("dummy/existing/dir2")
+            ]
         }
 
     def value(self, key: str, default=None):

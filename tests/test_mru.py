@@ -10,18 +10,17 @@ def mock_isdir(path: str) -> bool:
     return True
 
 def test_mru_manager_flow() -> None:
-    # Normalize paths so they are formatted consistently on POSIX and Windows
-    dir1 = os.path.abspath("/dummy/existing/dir1")
-    dir2 = os.path.abspath("/dummy/existing/dir2")
-    dir3 = os.path.abspath("/dummy/existing/dir3")
+    # Normalize paths so they are formatted consistently on POSIX and Windows using relative base paths
+    dir1 = os.path.abspath("dummy/existing/dir1")
+    dir2 = os.path.abspath("dummy/existing/dir2")
+    dir3 = os.path.abspath("dummy/existing/dir3")
     
-    # Under mock, QSettings is initialized with default ["/dummy/existing/dir1", "/dummy/existing/dir2"]
+    # Under mock, QSettings is initialized with default ["/dummy/existing/dir1", "/dummy/existing/dir2"] normalized
     # Patch os.path.isdir to return True only for mock directories
     with patch('os.path.isdir', side_effect=mock_isdir):
         mru = MruManager()
         
-        # In conftest.py, mru_directories is pre-seeded with POSIX paths, 
-        # which get_mru_directories() normalizes via os.path.abspath().
+        # Load verified MRU directories and verify
         dirs = mru.get_mru_directories()
         assert dirs == [dir1, dir2]
         
@@ -35,10 +34,10 @@ def test_mru_manager_flow() -> None:
         assert mru.get_mru_directories() == [dir3, dir1, dir2]
 
 def test_mru_manager_limit_and_deduplicate() -> None:
-    dir1 = os.path.abspath("/dummy/dir1")
-    dir2 = os.path.abspath("/dummy/dir2")
-    dir3 = os.path.abspath("/dummy/dir3")
-    dir4 = os.path.abspath("/dummy/dir4")
+    dir1 = os.path.abspath("dummy/dir1")
+    dir2 = os.path.abspath("dummy/dir2")
+    dir3 = os.path.abspath("dummy/dir3")
+    dir4 = os.path.abspath("dummy/dir4")
 
     with patch('os.path.isdir', side_effect=mock_isdir):
         mru = MruManager()
