@@ -32,3 +32,4 @@ docker run -it --rm `
     -e GEMINI_API_KEY=$apiKey `
     gemini-agent gemini
     
+    

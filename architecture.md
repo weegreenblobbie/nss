@@ -44,4 +44,13 @@ To maintain a clean repository, all code generation must adhere to the following
     *   **Purpose:** Contains the core PyQt6 application logic, the `QMainWindow` class, and the grid layout UI code.
 *   `nss/` (Existing Directory)
     *   **Purpose:** Contains the existing TIFF reading/writing modules which `color_gui.py` will import and utilize.
-    
+
+## 6. Environment & Dependencies
+*   **Virtual Environment:** Assume the application will be run on a Windows host inside a standard Python virtual environment (`venv`).
+*   **Requirements:** Maintain all third-party dependencies strictly within a `requirements.txt` file in the root directory. 
+*   **Agent Constraint:** Do not attempt to execute `pip install` or run Python scripts directly. When introducing a new dependency (like PyQt6 or OpenCV), update the `requirements.txt` file and instruct the user to install it.
+
+## 7. Testing & Quality Assurance
+*   **Framework:** Use `pytest`. All tests must reside in a `_tests.py` file next to the code module it is testing.
+*   **Decoupling:** Strictly decouple the core math and state logic (NumPy/OpenCV) from the PyQt6 GUI. The GUI should only act as a view layer.
+*   **Execution:** The agent is running in a Linux container equipped with Python, `pytest`, `pytest-qt`, and `pytest-xvfb`. The agent is highly encouraged to run `pytest` to verify its own logic as it builds.
