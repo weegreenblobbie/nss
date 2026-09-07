@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 from typing import TypedDict, Literal, List
 
+MutationAxis = Literal["All", "Hue", "Saturation", "Luminance"]
+
 class StateNode(TypedDict):
     harmony_mode: Literal["Monochromatic", "Analogous", "Complementary"]
     hue_shift: float        # overall hue shift (0 - 360)
@@ -95,7 +97,7 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
 
     return np.clip(rgb_graded, 0.0, 1.0)
 
-def generate_monochromatic_mutations(center: StateNode) -> List[StateNode]:
+def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "All") -> List[StateNode]:
     """
     Monochromatic: Lock hue; mutate only saturation and lightness.
     Returns 9 states (index 4 is exactly center).
@@ -113,17 +115,21 @@ def generate_monochromatic_mutations(center: StateNode) -> List[StateNode]:
             node["harmony_mode"] = "Monochromatic"
             states.append(node)
         else:
+            # Respect Mutation Axis constraint
+            actual_ds = ds if axis in ("All", "Saturation") else 0.0
+            actual_dl = dl if axis in ("All", "Luminance") else 0.0
+            
             states.append({
                 "harmony_mode": "Monochromatic",
                 "hue_shift": center["hue_shift"],
-                "sat_shift": float(np.clip(center["sat_shift"] + ds, -1.0, 1.0)),
-                "light_shift": float(np.clip(center["light_shift"] + dl, -1.0, 1.0)),
+                "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
+                "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "highlight_hue": center["highlight_hue"],
                 "shadow_hue": center["shadow_hue"],
             })
     return states
 
-def generate_analogous_mutations(center: StateNode) -> List[StateNode]:
+def generate_analogous_mutations(center: StateNode, axis: MutationAxis = "All") -> List[StateNode]:
     """
     Analogous: Mutate hue within a narrow adjacent band (e.g., ±30 degrees).
     Returns 9 states (index 4 is exactly center).
@@ -141,17 +147,24 @@ def generate_analogous_mutations(center: StateNode) -> List[StateNode]:
             node["harmony_mode"] = "Analogous"
             states.append(node)
         else:
+            # Respect Mutation Axis constraint
+            actual_dh = dh if axis in ("All", "Hue") else 0.0
+            actual_ds = ds if axis in ("All", "Saturation") else 0.0
+            actual_dl = 0.0
+            if axis == "Luminance":
+                actual_dl = ds  # Map 3x3 variation onto Lightness shift
+                
             states.append({
                 "harmony_mode": "Analogous",
-                "hue_shift": float((center["hue_shift"] + dh) % 360.0),
-                "sat_shift": float(np.clip(center["sat_shift"] + ds, -1.0, 1.0)),
-                "light_shift": center["light_shift"],
+                "hue_shift": float((center["hue_shift"] + actual_dh) % 360.0),
+                "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
+                "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "highlight_hue": center["highlight_hue"],
                 "shadow_hue": center["shadow_hue"],
             })
     return states
 
-def generate_complementary_mutations(center: StateNode) -> List[StateNode]:
+def generate_complementary_mutations(center: StateNode, axis: MutationAxis = "All") -> List[StateNode]:
     """
     Complementary: Force highlight hues to a target, and shadow hues to target + 180 degrees.
     Returns 9 states (index 4 is exactly center).
@@ -165,26 +178,42 @@ def generate_complementary_mutations(center: StateNode) -> List[StateNode]:
             node["harmony_mode"] = "Complementary"
             states.append(node)
         else:
-            new_highlight = float((center["highlight_hue"] + dh) % 360.0)
+            new_highlight = center["highlight_hue"]
+            new_sat = center["sat_shift"]
+            new_light = center["light_shift"]
+
+            if axis in ("All", "Hue"):
+                new_highlight = float((center["highlight_hue"] + dh) % 360.0)
+            elif axis == "Saturation":
+                # Scale -120..120 range of offsets to -0.3..0.3 for Saturation shift
+                new_sat = float(np.clip(center["sat_shift"] + (dh / 400.0), -1.0, 1.0))
+            elif axis == "Luminance":
+                # Scale -120..120 range of offsets to -0.3..0.3 for Lightness shift
+                new_light = float(np.clip(center["light_shift"] + (dh / 400.0), -1.0, 1.0))
+
             states.append({
                 "harmony_mode": "Complementary",
                 "hue_shift": center["hue_shift"],
-                "sat_shift": center["sat_shift"],
-                "light_shift": center["light_shift"],
+                "sat_shift": new_sat,
+                "light_shift": new_light,
                 "highlight_hue": new_highlight,
                 "shadow_hue": float((new_highlight + 180.0) % 360.0),
             })
     return states
 
-def generate_mutations(center: StateNode, mode: Literal["Monochromatic", "Analogous", "Complementary"]) -> List[StateNode]:
+def generate_mutations(
+    center: StateNode, 
+    mode: Literal["Monochromatic", "Analogous", "Complementary"],
+    axis: MutationAxis = "All"
+) -> List[StateNode]:
     """
-    Generates 9 mutations from the center state based on the specified harmony mode.
+    Generates 9 mutations from the center state based on the specified harmony mode and active mutation axis.
     """
     if mode == "Monochromatic":
-        return generate_monochromatic_mutations(center)
+        return generate_monochromatic_mutations(center, axis)
     elif mode == "Analogous":
-        return generate_analogous_mutations(center)
+        return generate_analogous_mutations(center, axis)
     elif mode == "Complementary":
-        return generate_complementary_mutations(center)
+        return generate_complementary_mutations(center, axis)
     else:
         raise ValueError(f"Unknown harmony mode: {mode}")

@@ -96,3 +96,24 @@ def test_luminosity_masks_complementary() -> None:
     assert np.all(np.isclose(H[:, :5], 300.0, atol=3.0))
     # Right half (Highlights) should have highlight hue = 120
     assert np.all(np.isclose(H[:, 5:], 120.0, atol=3.0))
+
+def test_mutation_axes() -> None:
+    center = create_default_state("Monochromatic")
+    center["hue_shift"] = 50.0
+    center["sat_shift"] = 0.5
+    center["light_shift"] = -0.5
+    
+    # Test Saturation Axis (lightness stays locked)
+    sat_states = generate_mutations(center, "Monochromatic", axis="Saturation")
+    assert len(sat_states) == 9
+    for s in sat_states:
+        assert s["light_shift"] == center["light_shift"]
+        assert s["hue_shift"] == center["hue_shift"]
+
+    # Test Luminance Axis (saturation stays locked)
+    lum_states = generate_mutations(center, "Monochromatic", axis="Luminance")
+    assert len(lum_states) == 9
+    for s in lum_states:
+        assert s["sat_shift"] == center["sat_shift"]
+        assert s["hue_shift"] == center["hue_shift"]
+

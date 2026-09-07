@@ -10,6 +10,9 @@ from PyQt6.QtWidgets import (
     QToolBar,
     QStatusBar,
     QFileDialog,
+    QRadioButton,
+    QButtonGroup,
+    QHBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap
@@ -17,6 +20,7 @@ from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap
 from nss.utils import TiffFile
 from nss.color_math import (
     StateNode,
+    MutationAxis,
     create_default_state,
     apply_grading,
     generate_mutations,
@@ -136,9 +140,9 @@ class GradingWorker(QThread):
     progress = pyqtSignal(int, np.ndarray)
     finished_all = pyqtSignal()
 
-    def __init__(self, master_image: np.ndarray, states: List[StateNode], skip_center: bool = False, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, working_image: np.ndarray, states: List[StateNode], skip_center: bool = False, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.master_image = master_image
+        self.working_image = working_image
         self.states = states
         self.skip_center = skip_center
         self.is_cancelled = False
@@ -163,7 +167,7 @@ class GradingWorker(QThread):
                 continue
             try:
                 # Core NumPy and OpenCV image processing grading happens in background
-                graded = apply_grading(self.master_image, self.states[i])
+                graded = apply_grading(self.working_image, self.states[i])
                 if self.is_cancelled:
                     return
                 self.progress.emit(i, graded)
@@ -179,10 +183,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("16-bit Color Grading Explorer")
-        self.resize(800, 800)
+        self.resize(1000, 800)
 
         # State Variables
         self.master_image: Optional[np.ndarray] = None
+        self.proxy_image: Optional[np.ndarray] = None
         self.tiff_obj: Optional[TiffFile] = None
         self.history_manager: HistoryManager = HistoryManager()
         self.mru_manager: MruManager = MruManager()
@@ -223,7 +228,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 1. Create Toolbar with buttons and combobox
+        # 1. Create Toolbar with buttons, combobox, and radio button group
         toolbar = QToolBar("Navigation and Controls")
         self.addToolBar(toolbar)
 
@@ -258,6 +263,43 @@ class MainWindow(QMainWindow):
         self.harmony_combo.addItems(["Monochromatic", "Analogous", "Complementary"])
         self.harmony_combo.currentTextChanged.connect(self.on_harmony_mode_changed)
         toolbar.addWidget(self.harmony_combo)
+
+        toolbar.addSeparator()
+
+        # Mutation Axis group
+        axis_label = QLabel(" Mutation Axis: ")
+        toolbar.addWidget(axis_label)
+
+        axis_widget = QWidget()
+        axis_layout = QHBoxLayout(axis_widget)
+        axis_layout.setContentsMargins(0, 0, 0, 0)
+        axis_layout.setSpacing(5)
+
+        self.axis_group = QButtonGroup(self)
+        self.radio_all = QRadioButton("All")
+        self.radio_hue = QRadioButton("Hue")
+        self.radio_sat = QRadioButton("Saturation")
+        self.radio_lum = QRadioButton("Luminance")
+
+        self.radio_all.setChecked(True)
+
+        self.axis_group.addButton(self.radio_all)
+        self.axis_group.addButton(self.radio_hue)
+        self.axis_group.addButton(self.radio_sat)
+        self.axis_group.addButton(self.radio_lum)
+
+        # Bind toggle triggers
+        self.radio_all.toggled.connect(self.on_axis_toggled)
+        self.radio_hue.toggled.connect(self.on_axis_toggled)
+        self.radio_sat.toggled.connect(self.on_axis_toggled)
+        self.radio_lum.toggled.connect(self.on_axis_toggled)
+
+        axis_layout.addWidget(self.radio_all)
+        axis_layout.addWidget(self.radio_hue)
+        axis_layout.addWidget(self.radio_sat)
+        axis_layout.addWidget(self.radio_lum)
+
+        toolbar.addWidget(axis_widget)
 
         # 2. Setup Central Widget and 3x3 Grid Layout
         central_widget = QWidget()
@@ -305,7 +347,6 @@ class MainWindow(QMainWindow):
 
         for i, path in enumerate(paths):
             action = QAction(f"&{i + 1}: {path}", self)
-            # lambda default parameter binds the loop variable path snapshot locally
             action.triggered.connect(lambda checked=False, p=path: self.open_file_dialog_at_dir(p))
             self.recent_menu.addAction(action)
 
@@ -330,10 +371,13 @@ class MainWindow(QMainWindow):
         )
         if file_path:
             try:
-                from nss.image_utils import load_tiff_to_float32
+                from nss.image_utils import load_tiff_to_float32, downsample_image
                 
-                # Load using the scaling pipeline
+                # Load using the scaling pipeline (high resolution master)
                 self.master_image, self.tiff_obj = load_tiff_to_float32(file_path)
+                
+                # Automatically generate a downsampled working proxy (1200px max dimension)
+                self.proxy_image = downsample_image(self.master_image, max_dim=1200)
                 
                 # Update MRU directories
                 self.mru_manager.add_path(file_path)
@@ -349,7 +393,8 @@ class MainWindow(QMainWindow):
                 
                 # Update status bar
                 shape_str = "x".join(map(str, self.master_image.shape))
-                self.status_bar.showMessage(f"Successfully loaded {file_path} ({shape_str})")
+                proxy_str = "x".join(map(str, self.proxy_image.shape))
+                self.status_bar.showMessage(f"Loaded {file_path} (Master: {shape_str}, Proxy: {proxy_str})")
             except Exception as e:
                 self.status_bar.showMessage(f"Error loading image: {str(e)}")
 
@@ -370,7 +415,7 @@ class MainWindow(QMainWindow):
         )
         if save_path:
             try:
-                # Apply current center grading to the master image
+                # Apply current center grading to the full-resolution master image!
                 center_state = self.grid_states[4]
                 graded_image = apply_grading(self.master_image, center_state)
                 
@@ -426,6 +471,28 @@ class MainWindow(QMainWindow):
             self.history_manager.push_state(new_state)
             self.render_grid_from_current_state()
 
+    def on_axis_toggled(self, checked: bool) -> None:
+        """
+        Triggered when a mutation axis radio button is toggled.
+        Only re-renders if checked is True (to avoid dual-triggering).
+        """
+        if not checked:
+            return
+        if self.master_image is not None:
+            self.render_grid_from_current_state()
+
+    def get_active_mutation_axis(self) -> MutationAxis:
+        """
+        Returns the string key of the active mutation axis.
+        """
+        if self.radio_hue.isChecked():
+            return "Hue"
+        elif self.radio_sat.isChecked():
+            return "Saturation"
+        elif self.radio_lum.isChecked():
+            return "Luminance"
+        return "All"
+
     def render_grid_from_current_state(self) -> None:
         """
         Renders all 9 containers asynchronously from the current active state in history.
@@ -439,7 +506,7 @@ class MainWindow(QMainWindow):
         Generates 9 mutations based on the input state, and fires up a background
         GradingWorker thread to compute and render the tiles progressively.
         """
-        if self.master_image is None:
+        if self.proxy_image is None:
             return
 
         # 1. Update combobox without triggering signals
@@ -453,8 +520,9 @@ class MainWindow(QMainWindow):
         self.save_action.setEnabled(True)
         self.history_label.setText(self.history_manager.get_history_display_text())
 
-        # 3. Generate the 9 state nodes for the grid
-        self.grid_states = generate_mutations(state, state["harmony_mode"])
+        # 3. Generate the 9 state nodes for the grid using active axis
+        axis = self.get_active_mutation_axis()
+        self.grid_states = generate_mutations(state, state["harmony_mode"], axis=axis)
 
         # 4. Cancel any running background worker thread safely
         if self.grading_worker is not None:
@@ -463,9 +531,9 @@ class MainWindow(QMainWindow):
                 self.grading_worker.wait()
             self.grading_worker = None
 
-        # 5. Create and launch the new worker thread
+        # 5. Create and launch the new worker thread using proxy_image for snappy UI calculation
         self.grading_worker = GradingWorker(
-            self.master_image,
+            self.proxy_image,
             self.grid_states,
             skip_center=skip_center,
             parent=self
@@ -478,7 +546,7 @@ class MainWindow(QMainWindow):
         """
         Updates a specific container tile in the grid as soon as it is computed.
         """
-        if self.master_image is not None:
+        if self.proxy_image is not None:
             self.containers[index].set_image(arr)
 
     def on_worker_finished(self) -> None:
@@ -493,7 +561,7 @@ class MainWindow(QMainWindow):
         Promotes the selected variation to the center immediately, using its
         pre-computed image, and then triggers progressive rendering of the 8 neighbors.
         """
-        if self.master_image is None or self.grid_states is None:
+        if self.proxy_image is None or self.grid_states is None:
             return
 
         if index == 4:
@@ -511,7 +579,7 @@ class MainWindow(QMainWindow):
             self.containers[4].set_active(True)
         else:
             # Fallback if somehow pixmap is missing (e.g. still rendering)
-            self.containers[4].set_image(apply_grading(self.master_image, chosen_state))
+            self.containers[4].set_image(apply_grading(self.proxy_image, chosen_state))
 
         # Clear other cells immediately to show we are generating new mutations around the new center
         for i in range(9):
