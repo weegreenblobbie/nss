@@ -14,21 +14,21 @@ This document tracks the implementation progress of the Color Grading Explorer. 
 
 ## Phase 2: Core Image Engine & I/O
 *Goal: Successfully load a 16-bit TIFF and process it as float32.*
-- [ ] Integrate the existing TIFF reading function from the `nss` repository.
-- [ ] Write a pipeline utility function in a separate module (e.g., `nss/image_utils.py`) to convert the loaded 16-bit array to `float32` (scaled 0.0 to 1.0).
-- [ ] Write a utility function to map the `float32` array back to an 8-bit `uint8` array format suitable for display.
-- [ ] Wire up a "File -> Open" menu action in the GUI to load a TIFF and display it in the center grid cell.
-- [ ] **TEST:** Write `tests/test_io.py` to verify the 16-bit array scaling math and conversions. **Do NOT import or test any PyQt6 objects in this test.** Run `pytest` to confirm.
+- [x] Integrate the existing TIFF reading function from the `nss` repository.
+- [x] Write a pipeline utility function in a separate module (e.g., `nss/image_utils.py`) to convert the loaded 16-bit array to `float32` (scaled 0.0 to 1.0).
+- [x] Write a utility function to map the `float32` array back to an 8-bit `uint8` array format suitable for display.
+- [x] Wire up a "File -> Open" menu action in the GUI to load a TIFF and display it in the center grid cell.
+- [x] **TEST:** Write `tests/test_io.py` to verify the 16-bit array scaling math and conversions. **Do NOT import or test any PyQt6 objects in this test.** Run `pytest` to confirm.
 
 ## Phase 3: Color Science & Mutation Math
 *Goal: Implement the NumPy/OpenCV math for color grading and mutation generation.*
-- [ ] Write a function to convert the `float32` image between BGR and HLS/LAB color spaces using OpenCV.
-- [ ] Implement NumPy luminosity masking utilities to isolate Shadows (e.g., L < 0.3), Midtones, and Highlights (e.g., L > 0.7).
-- [ ] Define the `StateNode` dictionary structure (e.g., tracking hue shifts and mode).
-- [ ] Implement the `Monochromatic` mutation generator logic.
-- [ ] Implement the `Analogous` mutation generator logic.
-- [ ] Implement the `Complementary` mutation generator logic.
-- [ ] **TEST:** Write `tests/test_math.py` to assert that the mutation and masking functions return mathematically valid arrays within expected bounds. **Do NOT import PyQt6.** Run `pytest` to confirm.
+- [x] Write a function to convert the `float32` image between BGR and HLS/LAB color spaces using OpenCV.
+- [x] Implement NumPy luminosity masking utilities to isolate Shadows (e.g., L < 0.3), Midtones, and Highlights (e.g., L > 0.7).
+- [x] Define the `StateNode` dictionary structure (e.g., tracking hue shifts and mode).
+- [x] Implement the `Monochromatic` mutation generator logic.
+- [x] Implement the `Analogous` mutation generator logic.
+- [x] Implement the `Complementary` mutation generator logic.
+- [x] **TEST:** Write `tests/test_math.py` to assert that the mutation and masking functions return mathematically valid arrays within expected bounds. **Do NOT import PyQt6.** Run `pytest` to confirm.
 
 ## Phase 4: Interactivity & State Management
 *Goal: Connect the math to the UI and enable exploration.*
