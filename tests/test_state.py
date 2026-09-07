@@ -17,6 +17,7 @@ def test_history_manager_basic_flow() -> None:
     assert not hm.can_undo()  # First state cannot undo
     assert not hm.can_redo()
     assert hm.get_current_state() == state_a
+    assert hm.get_history_display_text() == "Step: 1 of 1"
     
     # 2. Push state B
     state_b = create_default_state("Analogous")
@@ -26,18 +27,21 @@ def test_history_manager_basic_flow() -> None:
     assert hm.can_undo()
     assert not hm.can_redo()
     assert hm.get_current_state() == state_b
+    assert hm.get_history_display_text() == "Step: 2 of 2"
     
     # 3. Undo
     undone = hm.undo()
     assert undone == state_a
     assert not hm.can_undo()
     assert hm.can_redo()
+    assert hm.get_history_display_text() == "Step: 1 of 2"
     
     # 4. Redo
     redone = hm.redo()
     assert redone == state_b
     assert hm.can_undo()
     assert not hm.can_redo()
+    assert hm.get_history_display_text() == "Step: 2 of 2"
     
     # 5. Undo and then Push state C (clears B redo history)
     hm.undo()  # now at state_a

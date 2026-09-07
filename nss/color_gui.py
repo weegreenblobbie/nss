@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QFileDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap
 
 from nss.utils import TiffFile
@@ -127,6 +127,50 @@ class ImageContainer(QLabel):
         self.update_display_pixmap()
 
 
+class GradingWorker(QThread):
+    """
+    Background worker thread to compute color grading for mutations asynchronously
+    to prevent blocking the main PyQt6 GUI event thread.
+    """
+    progress = pyqtSignal(int, np.ndarray)
+    finished_all = pyqtSignal()
+
+    def __init__(self, master_image: np.ndarray, states: List[StateNode], skip_center: bool = False, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.master_image = master_image
+        self.states = states
+        self.skip_center = skip_center
+        self.is_cancelled = False
+
+    def cancel(self) -> None:
+        """
+        Signals the worker thread to stop processing.
+        """
+        self.is_cancelled = True
+
+    def run(self) -> None:
+        # Determine index processing sequence (render center index 4 first unless skipped)
+        if self.skip_center:
+            indices = [i for i in range(9) if i != 4]
+        else:
+            indices = [4] + [i for i in range(9) if i != 4]
+
+        for i in indices:
+            if self.is_cancelled:
+                return
+            if i >= len(self.states):
+                continue
+            try:
+                # Core NumPy and OpenCV image processing grading happens in background
+                graded = apply_grading(self.master_image, self.states[i])
+                if self.is_cancelled:
+                    return
+                self.progress.emit(i, graded)
+            except Exception:
+                pass
+        self.finished_all.emit()
+
+
 class MainWindow(QMainWindow):
     """
     The Main Window for the 16-bit Color Grading Explorer.
@@ -141,6 +185,7 @@ class MainWindow(QMainWindow):
         self.tiff_obj: Optional[TiffFile] = None
         self.history_manager: HistoryManager = HistoryManager()
         self.grid_states: Optional[List[StateNode]] = None
+        self.grading_worker: Optional[GradingWorker] = None
 
         # Setup UI Components
         self.init_ui()
@@ -182,6 +227,13 @@ class MainWindow(QMainWindow):
         self.back_action.setEnabled(False)
         self.back_action.triggered.connect(self.on_back_clicked)
         toolbar.addAction(self.back_action)
+
+        # History Index Display Label
+        self.history_label = QLabel("Step: 0 of 0")
+        self.history_label.setStyleSheet(
+            "font-weight: bold; margin-left: 10px; margin-right: 10px; color: #a0a0a0;"
+        )
+        toolbar.addWidget(self.history_label)
 
         # "Forward" button
         self.forward_action = QAction("Forward", self)
@@ -332,38 +384,70 @@ class MainWindow(QMainWindow):
 
     def render_grid_from_current_state(self) -> None:
         """
-        Renders all 9 containers from the master float32 image according to 
-        the current state in the history stack.
+        Renders all 9 containers asynchronously from the current active state in history.
+        """
+        state = self.history_manager.get_current_state()
+        if state is not None:
+            self.start_asynchronous_render_for_state(state, skip_center=False)
+
+    def start_asynchronous_render_for_state(self, state: StateNode, skip_center: bool = False) -> None:
+        """
+        Generates 9 mutations based on the input state, and fires up a background
+        GradingWorker thread to compute and render the tiles progressively.
         """
         if self.master_image is None:
             return
 
-        state = self.history_manager.get_current_state()
-        if state is None:
-            return
-
-        # 1. Update combobox without triggering event loops
+        # 1. Update combobox without triggering signals
         self.harmony_combo.blockSignals(True)
         self.harmony_combo.setCurrentText(state["harmony_mode"])
         self.harmony_combo.blockSignals(False)
 
-        # 2. Generate 9 mutations
-        self.grid_states = generate_mutations(state, state["harmony_mode"])
-
-        # 3. Apply grading and set image to each container
-        for i in range(9):
-            graded = apply_grading(self.master_image, self.grid_states[i])
-            self.containers[i].set_image(graded)
-
-        # 4. Update UI element enabled states
+        # 2. Update navigation controls and history index display immediately
         self.back_action.setEnabled(self.history_manager.can_undo())
         self.forward_action.setEnabled(self.history_manager.can_redo())
         self.save_action.setEnabled(True)
+        self.history_label.setText(self.history_manager.get_history_display_text())
+
+        # 3. Generate the 9 state nodes for the grid
+        self.grid_states = generate_mutations(state, state["harmony_mode"])
+
+        # 4. Cancel any running background worker thread safely
+        if self.grading_worker is not None:
+            if self.grading_worker.isRunning():
+                self.grading_worker.cancel()
+                self.grading_worker.wait()
+            self.grading_worker = None
+
+        # 5. Create and launch the new worker thread
+        self.grading_worker = GradingWorker(
+            self.master_image,
+            self.grid_states,
+            skip_center=skip_center,
+            parent=self
+        )
+        self.grading_worker.progress.connect(self.on_worker_progress)
+        self.grading_worker.finished_all.connect(self.on_worker_finished)
+        self.grading_worker.start()
+
+    def on_worker_progress(self, index: int, arr: np.ndarray) -> None:
+        """
+        Updates a specific container tile in the grid as soon as it is computed.
+        """
+        if self.master_image is not None:
+            self.containers[index].set_image(arr)
+
+    def on_worker_finished(self) -> None:
+        """
+        Updates the status bar when all outer mutations are finished processing.
+        """
+        self.status_bar.showMessage("Ready.")
 
     def on_container_clicked(self, index: int) -> None:
         """
         Handler for when an image container in the 3x3 grid is clicked.
-        Promotes the selected variation to the center.
+        Promotes the selected variation to the center immediately, using its
+        pre-computed image, and then triggers progressive rendering of the 8 neighbors.
         """
         if self.master_image is None or self.grid_states is None:
             return
@@ -372,13 +456,38 @@ class MainWindow(QMainWindow):
             # Clicking the center does nothing
             return
 
-        # Get the chosen StateNode from the clicked grid item
+        # 1. Promote clicked state parameters to center state
         chosen_state = self.grid_states[index]
 
-        # Push to history
+        # 2. Update center tile immediately with the pre-computed high-res pixmap of the clicked tile!
+        clicked_container = self.containers[index]
+        if clicked_container.master_pixmap is not None:
+            self.containers[4].master_pixmap = clicked_container.master_pixmap
+            self.containers[4].update_display_pixmap()
+            self.containers[4].set_active(True)
+        else:
+            # Fallback if somehow pixmap is missing (e.g. still rendering)
+            self.containers[4].set_image(apply_grading(self.master_image, chosen_state))
+
+        # Clear other cells immediately to show we are generating new mutations around the new center
+        for i in range(9):
+            if i != 4:
+                self.containers[i].set_image(None)
+
+        # 3. Push the new state to history
         self.history_manager.push_state(chosen_state)
 
-        # Re-render
-        self.render_grid_from_current_state()
+        # 4. Fire up background asynchronous worker to render other 8 tiles progressively, skipping the center!
+        self.start_asynchronous_render_for_state(chosen_state, skip_center=True)
         
-        self.status_bar.showMessage(f"Promoted mutation {index} to center.")
+        self.status_bar.showMessage(f"Promoted mutation {index} to center immediately. Computing new mutations...")
+
+    def closeEvent(self, event) -> None:
+        """
+        Safely stops active background thread when application is closed.
+        """
+        if self.grading_worker is not None:
+            if self.grading_worker.isRunning():
+                self.grading_worker.cancel()
+                self.grading_worker.wait()
+        super().closeEvent(event)

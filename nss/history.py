@@ -64,3 +64,11 @@ class HistoryManager:
         if 0 <= self.current_index < len(self.history):
             return self.history[self.current_index]
         return None
+
+    def get_history_display_text(self) -> str:
+        """
+        Returns a formatted 1-based history index and total stack size.
+        """
+        if len(self.history) == 0:
+            return "Step: 0 of 0"
+        return f"Step: {self.current_index + 1} of {len(self.history)}"
