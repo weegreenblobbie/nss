@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QHBoxLayout,
+    QVBoxLayout,
+    QSlider,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap
@@ -183,7 +185,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("16-bit Color Grading Explorer")
-        self.resize(1000, 800)
+        self.resize(1200, 800)
 
         # State Variables
         self.master_image: Optional[np.ndarray] = None
@@ -228,7 +230,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 1. Create Toolbar with buttons, combobox, and radio button group
+        # 1. Create Toolbar with buttons, combobox, radio button group, and step-size slider
         toolbar = QToolBar("Navigation and Controls")
         self.addToolBar(toolbar)
 
@@ -301,12 +303,35 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(axis_widget)
 
-        # 2. Setup Central Widget and 3x3 Grid Layout
+        toolbar.addSeparator()
+
+        # Mutation Intensity (Step Size) Slider
+        self.intensity_label = QLabel(" Intensity: 1.00x ")
+        self.intensity_label.setStyleSheet("color: #a0a0a0; font-weight: bold;")
+        toolbar.addWidget(self.intensity_label)
+
+        self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.intensity_slider.setRange(10, 200)
+        self.intensity_slider.setValue(100)
+        self.intensity_slider.setFixedWidth(120)
+        self.intensity_slider.setToolTip("Slide to scale mutation offset magnitude (0.10x to 2.00x)")
+        self.intensity_slider.valueChanged.connect(self.on_intensity_changed)
+        toolbar.addWidget(self.intensity_slider)
+
+        # 2. Setup Central Widget with QHBoxLayout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        grid_layout = QGridLayout(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(15)
+
+        # Left Side: 3x3 Grid Layout
+        grid_widget = QWidget()
+        grid_layout = QGridLayout(grid_widget)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
         grid_layout.setSpacing(10)
+        main_layout.addWidget(grid_widget, stretch=4)
 
         self.containers: List[ImageContainer] = []
         for i in range(9):
@@ -327,10 +352,119 @@ class MainWindow(QMainWindow):
                 container.set_active(False)
                 container.setText(f"Mutation {i}")
 
+        # Right Side: Vertical Read-only Inspector Panel
+        self.inspector_panel = QFrame()
+        self.inspector_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        self.inspector_panel.setFrameShadow(QFrame.Shadow.Raised)
+        self.inspector_panel.setFixedWidth(280)
+        self.inspector_panel.setStyleSheet(
+            "background-color: #252525; border: 1px solid #444; border-radius: 4px;"
+        )
+        
+        inspector_layout = QVBoxLayout(self.inspector_panel)
+        inspector_layout.setContentsMargins(15, 15, 15, 15)
+        inspector_layout.setSpacing(12)
+        
+        main_layout.addWidget(self.inspector_panel, stretch=1)
+
+        # Setup Inspector Widgets
+        header = QLabel("STATE INSPECTOR")
+        header.setStyleSheet("font-weight: bold; font-size: 14px; color: #40ff40; border: none; margin-bottom: 5px;")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        inspector_layout.addWidget(header)
+
+        def add_section(title: str) -> None:
+            sec_label = QLabel(title)
+            sec_label.setStyleSheet(
+                "font-weight: bold; color: #a0a0a0; border: none; "
+                "border-bottom: 1px solid #444; margin-top: 10px; padding-bottom: 2px;"
+            )
+            inspector_layout.addWidget(sec_label)
+
+        def add_row(label_text: str) -> QLabel:
+            row_widget = QWidget()
+            row_widget.setStyleSheet("border: none; background: transparent;")
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("color: #888; font-size: 11px;")
+            val = QLabel("-")
+            val.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px;")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            
+            row_layout.addWidget(lbl)
+            row_layout.addWidget(val)
+            inspector_layout.addWidget(row_widget)
+            return val
+
+        add_section("GLOBAL CONFIG")
+        self.mode_val = add_row("Harmony Mode:")
+        self.step_size_val = add_row("Mutation Intensity:")
+        self.glob_hue_val = add_row("Global Hue:")
+        self.glob_sat_val = add_row("Global Sat:")
+        self.glob_light_val = add_row("Global Light:")
+
+        add_section("SHADOWS (L < 0.3)")
+        self.sh_hue_val = add_row("Shadow Hue:")
+        self.sh_sat_val = add_row("Shadow Sat (Tint):")
+        self.sh_light_val = add_row("Shadow Light:")
+
+        add_section("MIDTONES (0.3 - 0.7)")
+        self.mid_hue_val = add_row("Midtone Hue:")
+        self.mid_sat_val = add_row("Midtone Sat (Tint):")
+        self.mid_light_val = add_row("Midtone Light:")
+
+        add_section("HIGHLIGHTS (L > 0.7)")
+        self.hi_hue_val = add_row("Highlight Hue:")
+        self.hi_sat_val = add_row("Highlight Sat (Tint):")
+        self.hi_light_val = add_row("Highlight Light:")
+
+        inspector_layout.addStretch()
+
         # 3. Setup Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready. Load a 16-bit TIFF image to begin.")
+
+    def update_inspector_panel(self, state: Optional[StateNode]) -> None:
+        """
+        Updates all text readouts in the Right-Hand Inspector panel to match the input StateNode.
+        """
+        if state is None:
+            self.mode_val.setText("-")
+            self.step_size_val.setText("-")
+            self.glob_hue_val.setText("-")
+            self.glob_sat_val.setText("-")
+            self.glob_light_val.setText("-")
+            self.sh_hue_val.setText("-")
+            self.sh_sat_val.setText("-")
+            self.sh_light_val.setText("-")
+            self.mid_hue_val.setText("-")
+            self.mid_sat_val.setText("-")
+            self.mid_light_val.setText("-")
+            self.hi_hue_val.setText("-")
+            self.hi_sat_val.setText("-")
+            self.hi_light_val.setText("-")
+            return
+
+        self.mode_val.setText(state.get("harmony_mode", "Monochromatic"))
+        self.step_size_val.setText(f"{state.get('step_size', 1.0):.2f}x")
+        self.glob_hue_val.setText(f"{state.get('hue_shift', 0.0):.1f}°")
+        self.glob_sat_val.setText(f"{state.get('sat_shift', 0.0):+.2f}")
+        self.glob_light_val.setText(f"{state.get('light_shift', 0.0):+.2f}")
+        
+        self.sh_hue_val.setText(f"{state.get('shadow_hue', 240.0):.1f}°")
+        self.sh_sat_val.setText(f"{state.get('shadow_sat', 0.0):.2f}")
+        self.sh_light_val.setText(f"{state.get('shadow_light', 0.0):+.2f}")
+
+        self.mid_hue_val.setText(f"{state.get('midtone_hue', 120.0):.1f}°")
+        self.mid_sat_val.setText(f"{state.get('midtone_sat', 0.0):.2f}")
+        self.mid_light_val.setText(f"{state.get('midtone_light', 0.0):+.2f}")
+
+        self.hi_hue_val.setText(f"{state.get('highlight_hue', 60.0):.1f}°")
+        self.hi_sat_val.setText(f"{state.get('highlight_sat', 0.0):.2f}")
+        self.hi_light_val.setText(f"{state.get('highlight_light', 0.0):+.2f}")
 
     def update_recent_directories_menu(self) -> None:
         """
@@ -454,32 +588,49 @@ class MainWindow(QMainWindow):
     def on_harmony_mode_changed(self, text: str) -> None:
         """
         Handler for when the user selects a different harmony mode from the dropdown.
+        Updates the active state's harmony mode and triggers re-generation of outer tiles,
+        keeping the center image completely untouched.
         """
         if self.master_image is None:
             return
             
-        current = self.history_manager.get_current_state()
-        if current is not None:
-            # Create a new state based on current but with the new mode
-            new_state = create_default_state(text)  # type: ignore
-            new_state["hue_shift"] = current["hue_shift"]
-            new_state["sat_shift"] = current["sat_shift"]
-            new_state["light_shift"] = current["light_shift"]
-            new_state["highlight_hue"] = current["highlight_hue"]
-            new_state["shadow_hue"] = current["shadow_hue"]
-            
-            self.history_manager.push_state(new_state)
-            self.render_grid_from_current_state()
+        state = self.history_manager.get_current_state()
+        if state is not None:
+            state["harmony_mode"] = text  # type: ignore
+            # Trigger outer progressive render, skipping the center!
+            self.start_asynchronous_render_for_state(state, skip_center=True)
 
     def on_axis_toggled(self, checked: bool) -> None:
         """
         Triggered when a mutation axis radio button is toggled.
-        Only re-renders if checked is True (to avoid dual-triggering).
+        Only re-renders outer tiles (skipping center) if checked is True.
+        Does NOT push a new state to history.
         """
-        if not checked:
+        if not checked or self.master_image is None:
             return
-        if self.master_image is not None:
-            self.render_grid_from_current_state()
+            
+        state = self.history_manager.get_current_state()
+        if state is not None:
+            self.start_asynchronous_render_for_state(state, skip_center=True)
+
+    def on_intensity_changed(self, value: int) -> None:
+        """
+        Triggered when the user slides the mutation intensity control.
+        Updates the intensity label, updates the active state's step_size,
+        and triggers a progressive re-render of the 8 surrounding outer tiles.
+        """
+        step_size = value / 100.0
+        self.intensity_label.setText(f" Intensity: {step_size:.2f}x ")
+        
+        if self.master_image is None:
+            return
+            
+        state = self.history_manager.get_current_state()
+        if state is not None:
+            state["step_size"] = step_size
+            self.update_inspector_panel(state)
+            # Re-render outer tiles only, keeping the center invariant
+            self.start_asynchronous_render_for_state(state, skip_center=True)
 
     def get_active_mutation_axis(self) -> MutationAxis:
         """
@@ -500,6 +651,7 @@ class MainWindow(QMainWindow):
         state = self.history_manager.get_current_state()
         if state is not None:
             self.start_asynchronous_render_for_state(state, skip_center=False)
+            self.update_inspector_panel(state)
 
     def start_asynchronous_render_for_state(self, state: StateNode, skip_center: bool = False) -> None:
         """
@@ -509,10 +661,16 @@ class MainWindow(QMainWindow):
         if self.proxy_image is None:
             return
 
-        # 1. Update combobox without triggering signals
-        self.harmony_combo.blockSignals(True)
-        self.harmony_combo.setCurrentText(state["harmony_mode"])
-        self.harmony_combo.blockSignals(False)
+        # 1. Sync the UI controls with the state parameters if we are loading/undoing/redoing
+        if not skip_center:
+            self.harmony_combo.blockSignals(True)
+            self.harmony_combo.setCurrentText(state["harmony_mode"])
+            self.harmony_combo.blockSignals(False)
+            
+            self.intensity_slider.blockSignals(True)
+            self.intensity_slider.setValue(int(state.get("step_size", 1.0) * 100.0))
+            self.intensity_slider.blockSignals(False)
+            self.intensity_label.setText(f" Intensity: {state.get('step_size', 1.0):.2f}x ")
 
         # 2. Update navigation controls and history index display immediately
         self.back_action.setEnabled(self.history_manager.can_undo())
@@ -520,9 +678,15 @@ class MainWindow(QMainWindow):
         self.save_action.setEnabled(True)
         self.history_label.setText(self.history_manager.get_history_display_text())
 
-        # 3. Generate the 9 state nodes for the grid using active axis
+        # 3. Generate the 9 state nodes for the grid using active UI mode and axis
+        active_mode = self.harmony_combo.currentText()  # type: ignore
         axis = self.get_active_mutation_axis()
-        self.grid_states = generate_mutations(state, state["harmony_mode"], axis=axis)
+        mutations = generate_mutations(state, active_mode, axis=axis)
+        
+        # Lock index 4 to be EXACTLY the original unchanged history state!
+        # This guarantees center image invariance on dropdown/axis changes!
+        mutations[4] = state.copy()
+        self.grid_states = mutations
 
         # 4. Cancel any running background worker thread safely
         if self.grading_worker is not None:
@@ -558,20 +722,25 @@ class MainWindow(QMainWindow):
     def on_container_clicked(self, index: int) -> None:
         """
         Handler for when an image container in the 3x3 grid is clicked.
-        Promotes the selected variation to the center immediately, using its
-        pre-computed image, and then triggers progressive rendering of the 8 neighbors.
+        Promotes selected outer variation to center immediately, or re-rolls mutation proposals
+        if the center tile itself is clicked.
         """
         if self.proxy_image is None or self.grid_states is None:
             return
 
         if index == 4:
-            # Clicking the center does nothing
+            # Clicking the center image tile triggers a re-roll of the 8 outer tiles
+            self.status_bar.showMessage("Re-rolling mutation proposals around center...")
+            state = self.history_manager.get_current_state()
+            if state is not None:
+                # Fire up background progressive rendering of the 8 outer tiles, skipping center
+                self.start_asynchronous_render_for_state(state, skip_center=True)
             return
 
         # 1. Promote clicked state parameters to center state
         chosen_state = self.grid_states[index]
 
-        # 2. Update center tile immediately with the pre-computed high-res pixmap of the clicked tile!
+        # 2. Update center tile immediately with pre-computed high-res pixmap of the clicked tile!
         clicked_container = self.containers[index]
         if clicked_container.master_pixmap is not None:
             self.containers[4].master_pixmap = clicked_container.master_pixmap
@@ -588,6 +757,7 @@ class MainWindow(QMainWindow):
 
         # 3. Push the new state to history
         self.history_manager.push_state(chosen_state)
+        self.update_inspector_panel(chosen_state)
 
         # 4. Fire up background asynchronous worker to render other 8 tiles progressively, skipping the center!
         self.start_asynchronous_render_for_state(chosen_state, skip_center=True)
