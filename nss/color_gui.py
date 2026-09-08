@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QSlider,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
-from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap
+from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap, QColor
 
 from nss.utils import TiffFile
 from nss.color_math import (
@@ -305,14 +305,14 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # Mutation Intensity (Step Size) Slider
-        self.intensity_label = QLabel(" Intensity: 1.00x ")
+        # Mutation Intensity (Step Size) Slider - Defaults to 0.20x magnitude (subtle steps)
+        self.intensity_label = QLabel(" Intensity: 0.20x ")
         self.intensity_label.setStyleSheet("color: #a0a0a0; font-weight: bold;")
         toolbar.addWidget(self.intensity_label)
 
         self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
         self.intensity_slider.setRange(10, 200)
-        self.intensity_slider.setValue(100)
+        self.intensity_slider.setValue(20)  # Default value 20 represents 0.20
         self.intensity_slider.setFixedWidth(120)
         self.intensity_slider.setToolTip("Slide to scale mutation offset magnitude (0.10x to 2.00x)")
         self.intensity_slider.valueChanged.connect(self.on_intensity_changed)
@@ -398,6 +398,31 @@ class MainWindow(QMainWindow):
             inspector_layout.addWidget(row_widget)
             return val
 
+        def add_hue_row(label_text: str) -> tuple[QLabel, QLabel]:
+            row_widget = QWidget()
+            row_widget.setStyleSheet("border: none; background: transparent;")
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("color: #888; font-size: 11px;")
+            
+            # Colored swatch block label
+            swatch = QLabel()
+            swatch.setFixedSize(24, 12)
+            swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px;")
+            
+            val = QLabel("-")
+            val.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px;")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            
+            row_layout.addWidget(lbl)
+            row_layout.addWidget(swatch)
+            row_layout.addWidget(val)
+            inspector_layout.addWidget(row_widget)
+            return val, swatch
+
         add_section("GLOBAL CONFIG")
         self.mode_val = add_row("Harmony Mode:")
         self.step_size_val = add_row("Mutation Intensity:")
@@ -406,17 +431,17 @@ class MainWindow(QMainWindow):
         self.glob_light_val = add_row("Global Light:")
 
         add_section("SHADOWS (L < 0.3)")
-        self.sh_hue_val = add_row("Shadow Hue:")
+        self.sh_hue_val, self.sh_swatch = add_hue_row("Shadow Hue:")
         self.sh_sat_val = add_row("Shadow Sat (Tint):")
         self.sh_light_val = add_row("Shadow Light:")
 
         add_section("MIDTONES (0.3 - 0.7)")
-        self.mid_hue_val = add_row("Midtone Hue:")
+        self.mid_hue_val, self.mid_swatch = add_hue_row("Midtone Hue:")
         self.mid_sat_val = add_row("Midtone Sat (Tint):")
         self.mid_light_val = add_row("Midtone Light:")
 
         add_section("HIGHLIGHTS (L > 0.7)")
-        self.hi_hue_val = add_row("Highlight Hue:")
+        self.hi_hue_val, self.hi_swatch = add_hue_row("Highlight Hue:")
         self.hi_sat_val = add_row("Highlight Sat (Tint):")
         self.hi_light_val = add_row("Highlight Light:")
 
@@ -429,7 +454,7 @@ class MainWindow(QMainWindow):
 
     def update_inspector_panel(self, state: Optional[StateNode]) -> None:
         """
-        Updates all text readouts in the Right-Hand Inspector panel to match the input StateNode.
+        Updates all text readouts and visual color swatches in the Right-Hand Inspector panel.
         """
         if state is None:
             self.mode_val.setText("-")
@@ -437,33 +462,75 @@ class MainWindow(QMainWindow):
             self.glob_hue_val.setText("-")
             self.glob_sat_val.setText("-")
             self.glob_light_val.setText("-")
+            
             self.sh_hue_val.setText("-")
+            self.sh_swatch.clear()
+            self.sh_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
             self.sh_sat_val.setText("-")
             self.sh_light_val.setText("-")
+            
             self.mid_hue_val.setText("-")
+            self.mid_swatch.clear()
+            self.mid_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
             self.mid_sat_val.setText("-")
             self.mid_light_val.setText("-")
+            
             self.hi_hue_val.setText("-")
+            self.hi_swatch.clear()
+            self.hi_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
             self.hi_sat_val.setText("-")
             self.hi_light_val.setText("-")
             return
 
+        is_comp = state.get("harmony_mode") == "Complementary"
+
         self.mode_val.setText(state.get("harmony_mode", "Monochromatic"))
-        self.step_size_val.setText(f"{state.get('step_size', 1.0):.2f}x")
+        self.step_size_val.setText(f"{state.get('step_size', 0.2):.2f}x")
         self.glob_hue_val.setText(f"{state.get('hue_shift', 0.0):.1f}°")
         self.glob_sat_val.setText(f"{state.get('sat_shift', 0.0):+.2f}")
         self.glob_light_val.setText(f"{state.get('light_shift', 0.0):+.2f}")
         
-        self.sh_hue_val.setText(f"{state.get('shadow_hue', 240.0):.1f}°")
-        self.sh_sat_val.setText(f"{state.get('shadow_sat', 0.0):.2f}")
+        # Shadows
+        sh_hue = state.get('shadow_hue', 240.0)
+        sh_sat = 0.15 if is_comp else state.get('shadow_sat', 0.0)
+        self.sh_hue_val.setText(f"{sh_hue:.1f}°")
+        
+        # Robust QPixmap/QColor-based color swatches bypassing stylesheet limitations
+        sh_color = QColor.fromHslF(sh_hue / 360.0, sh_sat, 0.5)
+        sh_pix = QPixmap(24, 12)
+        sh_pix.fill(sh_color)
+        self.sh_swatch.setPixmap(sh_pix)
+        self.sh_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
+        
+        self.sh_sat_val.setText(f"{sh_sat:.2f}")
         self.sh_light_val.setText(f"{state.get('shadow_light', 0.0):+.2f}")
 
-        self.mid_hue_val.setText(f"{state.get('midtone_hue', 120.0):.1f}°")
-        self.mid_sat_val.setText(f"{state.get('midtone_sat', 0.0):.2f}")
+        # Midtones
+        mid_hue = state.get('midtone_hue', 120.0)
+        mid_sat = state.get('midtone_sat', 0.0)
+        self.mid_hue_val.setText(f"{mid_hue:.1f}°")
+        
+        mid_color = QColor.fromHslF(mid_hue / 360.0, mid_sat, 0.5)
+        mid_pix = QPixmap(24, 12)
+        mid_pix.fill(mid_color)
+        self.mid_swatch.setPixmap(mid_pix)
+        self.mid_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
+        
+        self.mid_sat_val.setText(f"{mid_sat:.2f}")
         self.mid_light_val.setText(f"{state.get('midtone_light', 0.0):+.2f}")
 
-        self.hi_hue_val.setText(f"{state.get('highlight_hue', 60.0):.1f}°")
-        self.hi_sat_val.setText(f"{state.get('highlight_sat', 0.0):.2f}")
+        # Highlights
+        hi_hue = state.get('highlight_hue', 60.0)
+        hi_sat = 0.15 if is_comp else state.get('highlight_sat', 0.0)
+        self.hi_hue_val.setText(f"{hi_hue:.1f}°")
+        
+        hi_color = QColor.fromHslF(hi_hue / 360.0, hi_sat, 0.5)
+        hi_pix = QPixmap(24, 12)
+        hi_pix.fill(hi_color)
+        self.hi_swatch.setPixmap(hi_pix)
+        self.hi_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
+        
+        self.hi_sat_val.setText(f"{hi_sat:.2f}")
         self.hi_light_val.setText(f"{state.get('highlight_light', 0.0):+.2f}")
 
     def update_recent_directories_menu(self) -> None:
@@ -668,9 +735,9 @@ class MainWindow(QMainWindow):
             self.harmony_combo.blockSignals(False)
             
             self.intensity_slider.blockSignals(True)
-            self.intensity_slider.setValue(int(state.get("step_size", 1.0) * 100.0))
+            self.intensity_slider.setValue(int(state.get("step_size", 0.2) * 100.0))
             self.intensity_slider.blockSignals(False)
-            self.intensity_label.setText(f" Intensity: {state.get('step_size', 1.0):.2f}x ")
+            self.intensity_label.setText(f" Intensity: {state.get('step_size', 0.2):.2f}x ")
 
         # 2. Update navigation controls and history index display immediately
         self.back_action.setEnabled(self.history_manager.can_undo())
@@ -733,6 +800,10 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Re-rolling mutation proposals around center...")
             state = self.history_manager.get_current_state()
             if state is not None:
+                # Clear all surrounding cells immediately to give instant visual feedback that a re-roll has begun
+                for i in range(9):
+                    if i != 4:
+                        self.containers[i].set_image(None)
                 # Fire up background progressive rendering of the 8 outer tiles, skipping center
                 self.start_asynchronous_render_for_state(state, skip_center=True)
             return

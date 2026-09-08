@@ -35,7 +35,7 @@ def create_default_state(mode: Literal["Monochromatic", "Analogous", "Complement
         "hue_shift": 0.0,
         "sat_shift": 0.0,
         "light_shift": 0.0,
-        "step_size": 1.0,
+        "step_size": 0.2,
         # Shadows defaults
         "shadow_hue": 240.0,    # Default blue shadows
         "shadow_sat": 0.0,      # Default no tint strength
@@ -89,47 +89,37 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     # 4. Apply 3-Way Zone Grading (Color Injection)
     harmony_mode = state.get("harmony_mode", "Monochromatic")
 
+    sh_hue = state.get("shadow_hue", 240.0)
+    sh_sat = state.get("shadow_sat", 0.0)
+    mid_hue = state.get("midtone_hue", 120.0)
+    mid_sat = state.get("midtone_sat", 0.0)
+    hi_hue = state.get("highlight_hue", 60.0)
+    hi_sat = state.get("highlight_sat", 0.0)
+
+    # If complementary, shadows and highlights must have complementary hues
     if harmony_mode == "Complementary":
-        # Complementary mode directly forces highlights and shadows to complementary hues
-        t_high = state.get("highlight_hue", 60.0)
-        t_shadow = (t_high + 180.0) % 360.0
+        sh_hue = (hi_hue + 180.0) % 360.0
+        sh_sat = np.clip(sh_sat + 0.15, 0.0, 1.0)
+        hi_sat = np.clip(hi_sat + 0.15, 0.0, 1.0)
 
-        H[highlight_mask] = t_high
-        H[shadow_mask] = t_shadow
+    # Shadows Tint - Replace Hue directly for clean split-tone borders
+    if sh_sat > 0.0:
+        H[shadow_mask] = sh_hue
+        S[shadow_mask] = np.clip(S[shadow_mask] + sh_sat, 0.0, 1.0)
 
-        # Inject default rich complementary saturation
-        S[highlight_mask] = np.clip(S[highlight_mask] + 0.15, 0.0, 1.0)
-        S[shadow_mask] = np.clip(S[shadow_mask] + 0.15, 0.0, 1.0)
+    # Midtones Tint
+    if mid_sat > 0.0:
+        H[midtone_mask] = mid_hue
+        S[midtone_mask] = np.clip(S[midtone_mask] + mid_sat, 0.0, 1.0)
 
-        # Shift midtones by overall hue_shift
-        base_shift = state.get("hue_shift", 0.0)
-        H[midtone_mask] = (H[midtone_mask] + base_shift) % 360.0
-    else:
-        # Standard 3-Way Color Grading: Inject distinct colors into Shadows, Midtones, and Highlights
-        # Shadows Tint
-        sh_hue = state.get("shadow_hue", 240.0)
-        sh_sat = state.get("shadow_sat", 0.0)
-        if sh_sat > 0.0:
-            H[shadow_mask] = (H[shadow_mask] * (1.0 - sh_sat) + sh_hue * sh_sat) % 360.0
-            S[shadow_mask] = np.clip(S[shadow_mask] + sh_sat, 0.0, 1.0)
+    # Highlights Tint
+    if hi_sat > 0.0:
+        H[highlight_mask] = hi_hue
+        S[highlight_mask] = np.clip(S[highlight_mask] + hi_sat, 0.0, 1.0)
 
-        # Midtones Tint
-        mid_hue = state.get("midtone_hue", 120.0)
-        mid_sat = state.get("midtone_sat", 0.0)
-        if mid_sat > 0.0:
-            H[midtone_mask] = (H[midtone_mask] * (1.0 - mid_sat) + mid_hue * mid_sat) % 360.0
-            S[midtone_mask] = np.clip(S[midtone_mask] + mid_sat, 0.0, 1.0)
-
-        # Highlights Tint
-        hi_hue = state.get("highlight_hue", 60.0)
-        hi_sat = state.get("highlight_sat", 0.0)
-        if hi_sat > 0.0:
-            H[highlight_mask] = (H[highlight_mask] * (1.0 - hi_sat) + hi_hue * hi_sat) % 360.0
-            S[highlight_mask] = np.clip(S[highlight_mask] + hi_sat, 0.0, 1.0)
-
-        # Global Hue Shift
-        base_shift = state.get("hue_shift", 0.0)
-        H = (H + base_shift) % 360.0
+    # Global Hue Shift
+    base_shift = state.get("hue_shift", 0.0)
+    H = (H + base_shift) % 360.0
 
     # Apply Zone Lightness Adjustments
     L[shadow_mask] = np.clip(L[shadow_mask] + state.get("shadow_light", 0.0), 0.0, 1.0)
@@ -149,7 +139,7 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
 
     return np.clip(rgb_graded, 0.0, 1.0)
 
-def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 1.0) -> List[StateNode]:
+def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 0.2) -> List[StateNode]:
     """
     Monochromatic: Lock hue; mutate only saturation and lightness.
     Varies zone-specific saturations and light offsets to drive rich tonal changes.
@@ -178,31 +168,34 @@ def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "Al
             actual_ds = (scaled_ds + perturb_ds) if axis in ("All", "Saturation") else 0.0
             actual_dl = (scaled_dl + perturb_dl) if axis in ("All", "Luminance") else 0.0
 
+            # Locked base hue
+            base_hue = center["hue_shift"]
+
             states.append({
                 "harmony_mode": "Monochromatic",
-                "hue_shift": center["hue_shift"],
+                "hue_shift": base_hue,
                 "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
                 "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "step_size": center["step_size"],
-                # Mutate zone strengths slightly for rich monochromatic variety
-                "shadow_hue": center["shadow_hue"],
-                "shadow_sat": float(np.clip(center["shadow_sat"] + actual_ds * 0.3, 0.0, 1.0)),
+                # Mutate zone strengths slightly for rich monochromatic variety with baseline saturation
+                "shadow_hue": base_hue,
+                "shadow_sat": float(np.clip(center["shadow_sat"] + 0.15 + actual_ds * 0.4, 0.01, 1.0)),
                 "shadow_light": float(np.clip(center["shadow_light"] + actual_dl * 0.5, -1.0, 1.0)),
                 
-                "midtone_hue": center["midtone_hue"],
-                "midtone_sat": float(np.clip(center["midtone_sat"] + actual_ds * 0.3, 0.0, 1.0)),
+                "midtone_hue": base_hue,
+                "midtone_sat": float(np.clip(center["midtone_sat"] + 0.10 + actual_ds * 0.2, 0.01, 1.0)),
                 "midtone_light": float(np.clip(center["midtone_light"] + actual_dl * 0.5, -1.0, 1.0)),
                 
-                "highlight_hue": center["highlight_hue"],
-                "highlight_sat": float(np.clip(center["highlight_sat"] + actual_ds * 0.3, 0.0, 1.0)),
+                "highlight_hue": base_hue,
+                "highlight_sat": float(np.clip(center["highlight_sat"] + 0.20 + actual_ds * 0.4, 0.01, 1.0)),
                 "highlight_light": float(np.clip(center["highlight_light"] + actual_dl * 0.5, -1.0, 1.0)),
             })
     return states
 
-def generate_analogous_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 1.0) -> List[StateNode]:
+def generate_analogous_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 0.2) -> List[StateNode]:
     """
     Analogous: Mutate hue within a narrow adjacent band (e.g., ±25 degrees).
-    Distributes analogous hue offsets across Shadows, Midtones, and Highlights.
+    Distributes analogous hue offsets across Shadows (-25°), Midtones (0°), and Highlights (+25°).
     Scaled and perturbed by the step_size/intensity.
     """
     states: List[StateNode] = []
@@ -231,28 +224,33 @@ def generate_analogous_mutations(center: StateNode, axis: MutationAxis = "All", 
             if axis == "Luminance":
                 actual_dl = ds * step_size  # Map 3x3 variation onto Lightness shift
 
+            # Analogous hue mapping across zones for beautifully separated warm/cool gradients
+            base_midtone = (center["hue_shift"] + actual_dh) % 360.0
+            analogous_shadow = (base_midtone - 25.0 * step_size) % 360.0
+            analogous_highlight = (base_midtone + 25.0 * step_size) % 360.0
+
             states.append({
                 "harmony_mode": "Analogous",
-                "hue_shift": float((center["hue_shift"] + actual_dh) % 360.0),
+                "hue_shift": base_midtone,
                 "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
                 "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "step_size": center["step_size"],
-                # Perturb zone hues analogously to create beautifully separated color steps
-                "shadow_hue": float((center["shadow_hue"] + actual_dh) % 360.0),
-                "shadow_sat": float(np.clip(center["shadow_sat"] + (0.1 if actual_ds != 0 else 0.0), 0.0, 1.0)),
+                # Active analogous color injection with non-zero baseline saturation
+                "shadow_hue": analogous_shadow,
+                "shadow_sat": float(np.clip(center["shadow_sat"] + 0.15 + actual_ds * 0.4, 0.05, 1.0)),
                 "shadow_light": float(np.clip(center["shadow_light"] + actual_dl * 0.3, -1.0, 1.0)),
 
-                "midtone_hue": float((center["midtone_hue"] + actual_dh) % 360.0),
-                "midtone_sat": float(np.clip(center["midtone_sat"] + (0.1 if actual_ds != 0 else 0.0), 0.0, 1.0)),
+                "midtone_hue": base_midtone,
+                "midtone_sat": float(np.clip(center["midtone_sat"] + 0.10 + actual_ds * 0.2, 0.05, 1.0)),
                 "midtone_light": float(np.clip(center["midtone_light"] + actual_dl * 0.3, -1.0, 1.0)),
 
-                "highlight_hue": float((center["highlight_hue"] + actual_dh) % 360.0),
-                "highlight_sat": float(np.clip(center["highlight_sat"] + (0.1 if actual_ds != 0 else 0.0), 0.0, 1.0)),
+                "highlight_hue": analogous_highlight,
+                "highlight_sat": float(np.clip(center["highlight_sat"] + 0.20 + actual_ds * 0.4, 0.05, 1.0)),
                 "highlight_light": float(np.clip(center["highlight_light"] + actual_dl * 0.3, -1.0, 1.0)),
             })
     return states
 
-def generate_complementary_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 1.0) -> List[StateNode]:
+def generate_complementary_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 0.2) -> List[StateNode]:
     """
     Complementary: Force highlight hues to a target, and shadow hues to target + 180 degrees.
     Varies Complementary highlight/shadow hues and saturation/lightness across zones.
@@ -294,13 +292,13 @@ def generate_complementary_mutations(center: StateNode, axis: MutationAxis = "Al
                 "light_shift": new_light,
                 "step_size": center["step_size"],
                 
-                # Complementary highlight hue drives shadow hue at exactly +180 deg
+                # Active complementary split injection with non-zero baseline saturation
                 "highlight_hue": new_highlight,
-                "highlight_sat": float(np.clip(center["highlight_sat"] + zone_sat_offset, 0.0, 1.0)),
+                "highlight_sat": float(np.clip(center["highlight_sat"] + 0.20 + zone_sat_offset, 0.05, 1.0)),
                 "highlight_light": float(np.clip(center["highlight_light"] + zone_light_offset, -1.0, 1.0)),
                 
                 "shadow_hue": float((new_highlight + 180.0) % 360.0),
-                "shadow_sat": float(np.clip(center["shadow_sat"] + zone_sat_offset, 0.0, 1.0)),
+                "shadow_sat": float(np.clip(center["shadow_sat"] + 0.20 + zone_sat_offset, 0.05, 1.0)),
                 "shadow_light": float(np.clip(center["shadow_light"] + zone_light_offset, -1.0, 1.0)),
                 
                 # Keep midtone locked or slightly shifted
@@ -318,7 +316,7 @@ def generate_mutations(
     """
     Generates 9 mutations from the center state based on the specified harmony mode and active mutation axis.
     """
-    step_size = center.get("step_size", 1.0)
+    step_size = center.get("step_size", 0.2)
     if mode == "Monochromatic":
         return generate_monochromatic_mutations(center, axis, step_size)
     elif mode == "Analogous":
