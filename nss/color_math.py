@@ -13,6 +13,9 @@ class StateNode(TypedDict):
     sat_shift: float        # overall saturation shift (-1.0 to 1.0)
     light_shift: float      # overall lightness shift (-1.0 to 1.0)
     step_size: float        # global mutation intensity / step size (0.1 to 2.0)
+    # Master controls for 3-way blending
+    blending: float         # zone overlap / transition softness (0.0 to 1.0)
+    balance: float          # bias toward shadows (-1.0) or highlights (+1.0)
     # Shadows zone (L < 0.3)
     shadow_hue: float       # target shadow tint hue (0 - 360)
     shadow_sat: float       # shadow tint strength / saturation (0.0 to 1.0)
@@ -28,7 +31,7 @@ class StateNode(TypedDict):
 
 def create_default_state(mode: Literal["Monochromatic", "Analogous", "Complementary"] = "Monochromatic") -> StateNode:
     """
-    Creates a baseline StateNode dictionary with full 3-way color grading support.
+    Creates a baseline StateNode dictionary with full 3-way color grading and blend/balance support.
     """
     return {
         "harmony_mode": mode,
@@ -36,6 +39,8 @@ def create_default_state(mode: Literal["Monochromatic", "Analogous", "Complement
         "sat_shift": 0.0,
         "light_shift": 0.0,
         "step_size": 0.2,
+        "blending": 0.5,        # Overlap softness
+        "balance": 0.0,         # Shadow/Highlight bias
         # Shadows defaults
         "shadow_hue": 240.0,    # Default blue shadows
         "shadow_sat": 0.0,      # Default no tint strength
@@ -67,7 +72,8 @@ def ensure_rgb(img: np.ndarray) -> np.ndarray:
 
 def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     """
-    Applies 3-way zone-based color grading parameters from the state to the input image.
+    Applies professional 3-way zone-based color grading parameters from the state to the input image.
+    Uses master blending and balance values to softly transition colors between zones.
     Returns a graded float32 image in [0.0, 1.0] RGB format.
     """
     # 1. Ensure input is RGB float32
@@ -81,12 +87,25 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     L = hls[:, :, 1]
     S = hls[:, :, 2]
 
-    # 3. Create luminosity masks (using original L channel)
-    shadow_mask = L < 0.3
-    highlight_mask = L > 0.7
-    midtone_mask = (L >= 0.3) & (L <= 0.7)
+    # 3. Compute soft zone masks based on master balance and blending parameters
+    balance = state.get("balance", 0.0)
+    # Shift effective lightness used for mask boundaries based on balance
+    L_shifted = np.clip(L - 0.3 * balance, 0.0, 1.0)
+    
+    blending = state.get("blending", 0.5)
+    # Softness width scales from 0.01 (hard borders) up to 0.40 (highly feathered overlap)
+    softness = max(0.01, 0.05 + 0.35 * blending)
 
-    # 4. Apply 3-Way Zone Grading (Color Injection)
+    # Shadows Soft Mask (centered at L = 0.3)
+    shadow_weight = np.clip((0.3 + softness/2.0 - L_shifted) / softness, 0.0, 1.0)
+
+    # Highlights Soft Mask (centered at L = 0.7)
+    highlight_weight = np.clip((L_shifted - (0.7 - softness/2.0)) / softness, 0.0, 1.0)
+
+    # Midtones Soft Mask (fills the remaining space between highlights and shadows)
+    midtone_weight = np.clip(1.0 - shadow_weight - highlight_weight, 0.0, 1.0)
+
+    # 4. Compute target zone colors
     harmony_mode = state.get("harmony_mode", "Monochromatic")
 
     sh_hue = state.get("shadow_hue", 240.0)
@@ -96,44 +115,50 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     hi_hue = state.get("highlight_hue", 60.0)
     hi_sat = state.get("highlight_sat", 0.0)
 
-    # If complementary, shadows and highlights must have complementary hues
+    # Complementary coupling: Force Highlights and Shadows to opposite hues
     if harmony_mode == "Complementary":
         sh_hue = (hi_hue + 180.0) % 360.0
         sh_sat = np.clip(sh_sat + 0.15, 0.0, 1.0)
         hi_sat = np.clip(hi_sat + 0.15, 0.0, 1.0)
 
-    # Shadows Tint - Replace Hue directly for clean split-tone borders
-    if sh_sat > 0.0:
-        H[shadow_mask] = sh_hue
-        S[shadow_mask] = np.clip(S[shadow_mask] + sh_sat, 0.0, 1.0)
+    # 5. Apply soft-mask color injection into H and S channels (weighted average blending)
+    total_tint_weight = (shadow_weight * sh_sat) + (midtone_weight * mid_sat) + (highlight_weight * hi_sat)
+    
+    tint_mask = total_tint_weight > 0.0
+    if np.any(tint_mask):
+        # Calculate target Hue via weighted interpolation
+        target_h = (
+            (shadow_weight[tint_mask] * sh_sat * sh_hue) +
+            (midtone_weight[tint_mask] * mid_sat * mid_hue) +
+            (highlight_weight[tint_mask] * hi_sat * hi_hue)
+        ) / total_tint_weight[tint_mask]
+        
+        # Set Hue channel directly to target Hue to prevent muddy partial hue shifts
+        H[tint_mask] = target_h
+        
+        # Softly scale/inject Saturation
+        S[tint_mask] = np.clip(S[tint_mask] + total_tint_weight[tint_mask], 0.0, 1.0)
 
-    # Midtones Tint
-    if mid_sat > 0.0:
-        H[midtone_mask] = mid_hue
-        S[midtone_mask] = np.clip(S[midtone_mask] + mid_sat, 0.0, 1.0)
+    # 6. Apply Zone Lightness Adjustments based on soft weights
+    L = np.clip(
+        L + 
+        (shadow_weight * state.get("shadow_light", 0.0)) +
+        (midtone_weight * state.get("midtone_light", 0.0)) +
+        (highlight_weight * state.get("highlight_light", 0.0)),
+        0.0, 1.0
+    )
 
-    # Highlights Tint
-    if hi_sat > 0.0:
-        H[highlight_mask] = hi_hue
-        S[highlight_mask] = np.clip(S[highlight_mask] + hi_sat, 0.0, 1.0)
-
-    # Global Hue Shift
+    # 7. Apply Master Global Hue, Saturation, and Lightness shifts
     base_shift = state.get("hue_shift", 0.0)
     H = (H + base_shift) % 360.0
 
-    # Apply Zone Lightness Adjustments
-    L[shadow_mask] = np.clip(L[shadow_mask] + state.get("shadow_light", 0.0), 0.0, 1.0)
-    L[midtone_mask] = np.clip(L[midtone_mask] + state.get("midtone_light", 0.0), 0.0, 1.0)
-    L[highlight_mask] = np.clip(L[highlight_mask] + state.get("highlight_light", 0.0), 0.0, 1.0)
-
-    # 5. Apply Global Saturation and Lightness shifts
     sat_shift = state.get("sat_shift", 0.0)
     S = np.clip(S + sat_shift, 0.0, 1.0)
 
     light_shift = state.get("light_shift", 0.0)
     L = np.clip(L + light_shift, 0.0, 1.0)
 
-    # 6. Merge channels and convert back to RGB
+    # 8. Merge channels and convert back to RGB
     hls_graded = np.stack([H, L, S], axis=2)
     rgb_graded = cv2.cvtColor(hls_graded, cv2.COLOR_HLS2RGB)
 
@@ -177,6 +202,8 @@ def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "Al
                 "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
                 "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "step_size": center["step_size"],
+                "blending": center["blending"],
+                "balance": center["balance"],
                 # Mutate zone strengths slightly for rich monochromatic variety with baseline saturation
                 "shadow_hue": base_hue,
                 "shadow_sat": float(np.clip(center["shadow_sat"] + 0.15 + actual_ds * 0.4, 0.01, 1.0)),
@@ -235,6 +262,8 @@ def generate_analogous_mutations(center: StateNode, axis: MutationAxis = "All", 
                 "sat_shift": float(np.clip(center["sat_shift"] + actual_ds, -1.0, 1.0)),
                 "light_shift": float(np.clip(center["light_shift"] + actual_dl, -1.0, 1.0)),
                 "step_size": center["step_size"],
+                "blending": center["blending"],
+                "balance": center["balance"],
                 # Active analogous color injection with non-zero baseline saturation
                 "shadow_hue": analogous_shadow,
                 "shadow_sat": float(np.clip(center["shadow_sat"] + 0.15 + actual_ds * 0.4, 0.05, 1.0)),
@@ -291,7 +320,8 @@ def generate_complementary_mutations(center: StateNode, axis: MutationAxis = "Al
                 "sat_shift": new_sat,
                 "light_shift": new_light,
                 "step_size": center["step_size"],
-                
+                "blending": center["blending"],
+                "balance": center["balance"],
                 # Active complementary split injection with non-zero baseline saturation
                 "highlight_hue": new_highlight,
                 "highlight_sat": float(np.clip(center["highlight_sat"] + 0.20 + zone_sat_offset, 0.05, 1.0)),

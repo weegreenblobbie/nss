@@ -4,17 +4,16 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QGridLayout,
-    QComboBox,
     QLabel,
     QFrame,
     QToolBar,
     QStatusBar,
     QFileDialog,
-    QRadioButton,
-    QButtonGroup,
     QHBoxLayout,
     QVBoxLayout,
     QSlider,
+    QTabWidget,
+    QColorDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap, QColor
@@ -134,6 +133,27 @@ class ImageContainer(QLabel):
         self.update_display_pixmap()
 
 
+class ResetLabel(QLabel):
+    """
+    A custom QLabel that detects double clicks and emits a signal to reset controls.
+    """
+    doubleClicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.doubleClicked.emit()
+
+
+class ClickableSwatchLabel(QLabel):
+    """
+    A custom QLabel that acts as a clickable color swatch to open QColorDialog.
+    """
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+
 class GradingWorker(QThread):
     """
     Background worker thread to compute color grading for mutations asynchronously
@@ -180,12 +200,12 @@ class GradingWorker(QThread):
 
 class MainWindow(QMainWindow):
     """
-    The Main Window for the 16-bit Color Grading Explorer.
+    The Main Window for the 16-bit Color Grading Explorer with Lightroom-style controls.
     """
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("16-bit Color Grading Explorer")
-        self.resize(1200, 800)
+        self.resize(1300, 850)
 
         # State Variables
         self.master_image: Optional[np.ndarray] = None
@@ -230,7 +250,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 1. Create Toolbar with buttons, combobox, radio button group, and step-size slider
+        # 1. Create Toolbar with Back/Forward, Step-size slider and History label
         toolbar = QToolBar("Navigation and Controls")
         self.addToolBar(toolbar)
 
@@ -254,54 +274,6 @@ class MainWindow(QMainWindow):
         self.forward_action.setEnabled(False)
         self.forward_action.triggered.connect(self.on_forward_clicked)
         toolbar.addAction(self.forward_action)
-
-        toolbar.addSeparator()
-
-        # Harmony Mode label and dropdown
-        mode_label = QLabel(" Harmony Mode: ")
-        toolbar.addWidget(mode_label)
-
-        self.harmony_combo = QComboBox()
-        self.harmony_combo.addItems(["Monochromatic", "Analogous", "Complementary"])
-        self.harmony_combo.currentTextChanged.connect(self.on_harmony_mode_changed)
-        toolbar.addWidget(self.harmony_combo)
-
-        toolbar.addSeparator()
-
-        # Mutation Axis group
-        axis_label = QLabel(" Mutation Axis: ")
-        toolbar.addWidget(axis_label)
-
-        axis_widget = QWidget()
-        axis_layout = QHBoxLayout(axis_widget)
-        axis_layout.setContentsMargins(0, 0, 0, 0)
-        axis_layout.setSpacing(5)
-
-        self.axis_group = QButtonGroup(self)
-        self.radio_all = QRadioButton("All")
-        self.radio_hue = QRadioButton("Hue")
-        self.radio_sat = QRadioButton("Saturation")
-        self.radio_lum = QRadioButton("Luminance")
-
-        self.radio_all.setChecked(True)
-
-        self.axis_group.addButton(self.radio_all)
-        self.axis_group.addButton(self.radio_hue)
-        self.axis_group.addButton(self.radio_sat)
-        self.axis_group.addButton(self.radio_lum)
-
-        # Bind toggle triggers
-        self.radio_all.toggled.connect(self.on_axis_toggled)
-        self.radio_hue.toggled.connect(self.on_axis_toggled)
-        self.radio_sat.toggled.connect(self.on_axis_toggled)
-        self.radio_lum.toggled.connect(self.on_axis_toggled)
-
-        axis_layout.addWidget(self.radio_all)
-        axis_layout.addWidget(self.radio_hue)
-        axis_layout.addWidget(self.radio_sat)
-        axis_layout.addWidget(self.radio_lum)
-
-        toolbar.addWidget(axis_widget)
 
         toolbar.addSeparator()
 
@@ -352,11 +324,11 @@ class MainWindow(QMainWindow):
                 container.set_active(False)
                 container.setText(f"Mutation {i}")
 
-        # Right Side: Vertical Read-only Inspector Panel
+        # Right Side: Structured Lightroom-Style Manual 3-Way Color Grading Control Dock
         self.inspector_panel = QFrame()
         self.inspector_panel.setFrameShape(QFrame.Shape.StyledPanel)
         self.inspector_panel.setFrameShadow(QFrame.Shadow.Raised)
-        self.inspector_panel.setFixedWidth(280)
+        self.inspector_panel.setFixedWidth(300)
         self.inspector_panel.setStyleSheet(
             "background-color: #252525; border: 1px solid #444; border-radius: 4px;"
         )
@@ -367,171 +339,343 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.inspector_panel, stretch=1)
 
-        # Setup Inspector Widgets
-        header = QLabel("STATE INSPECTOR")
+        # Dock Title Header
+        header = QLabel("3-WAY COLOR GRADING")
         header.setStyleSheet("font-weight: bold; font-size: 14px; color: #40ff40; border: none; margin-bottom: 5px;")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         inspector_layout.addWidget(header)
 
-        def add_section(title: str) -> None:
-            sec_label = QLabel(title)
-            sec_label.setStyleSheet(
-                "font-weight: bold; color: #a0a0a0; border: none; "
-                "border-bottom: 1px solid #444; margin-top: 10px; padding-bottom: 2px;"
-            )
-            inspector_layout.addWidget(sec_label)
+        # 3-Zone Tabs Setup
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(
+            "QTabWidget::pane { border: 1px solid #444; background-color: #2b2b2b; }"
+            "QTabBar::tab { background-color: #333; color: #aaa; padding: 6px 12px; border: 1px solid #444; }"
+            "QTabBar::tab:selected { background-color: #2b2b2b; color: #eee; font-weight: bold; }"
+        )
+        inspector_layout.addWidget(self.tabs)
 
-        def add_row(label_text: str) -> QLabel:
-            row_widget = QWidget()
-            row_widget.setStyleSheet("border: none; background: transparent;")
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            
-            lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #888; font-size: 11px;")
-            val = QLabel("-")
-            val.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px;")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight)
-            
-            row_layout.addWidget(lbl)
-            row_layout.addWidget(val)
-            inspector_layout.addWidget(row_widget)
-            return val
+        # Tab Helper Function
+        def create_zone_tab(title_prefix: str, default_h: int) -> tuple[QWidget, QSlider, ResetLabel, QSlider, ResetLabel, QSlider, ResetLabel, ClickableSwatchLabel]:
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(12, 12, 12, 12)
+            tab_layout.setSpacing(8)
 
-        def add_hue_row(label_text: str) -> tuple[QLabel, QLabel]:
-            row_widget = QWidget()
-            row_widget.setStyleSheet("border: none; background: transparent;")
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(6)
-            
-            lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #888; font-size: 11px;")
-            
-            # Colored swatch block label
-            swatch = QLabel()
-            swatch.setFixedSize(24, 12)
-            swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px;")
-            
-            val = QLabel("-")
-            val.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px;")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight)
-            
-            row_layout.addWidget(lbl)
-            row_layout.addWidget(swatch)
-            row_layout.addWidget(val)
-            inspector_layout.addWidget(row_widget)
-            return val, swatch
+            # Top Header Row with Swatch Label
+            top_row = QHBoxLayout()
+            title_lbl = QLabel(f"{title_prefix} Color parameters")
+            title_lbl.setStyleSheet("font-weight: bold; color: #ddd; font-size: 11px;")
+            swatch_lbl = ClickableSwatchLabel()
+            swatch_lbl.setFixedSize(36, 14)
+            swatch_lbl.setStyleSheet("border: 1px solid #555; border-radius: 2px;")
+            swatch_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            swatch_lbl.setToolTip("Click to open color picker wheel")
+            top_row.addWidget(title_lbl)
+            top_row.addStretch()
+            top_row.addWidget(swatch_lbl)
+            tab_layout.addLayout(top_row)
 
-        add_section("GLOBAL CONFIG")
-        self.mode_val = add_row("Harmony Mode:")
-        self.step_size_val = add_row("Mutation Intensity:")
-        self.glob_hue_val = add_row("Global Hue:")
-        self.glob_sat_val = add_row("Global Sat:")
-        self.glob_light_val = add_row("Global Light:")
+            # Hue Control (Double click label to reset to default)
+            hue_lbl = ResetLabel(f"Hue: {default_h}°")
+            hue_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+            hue_lbl.setToolTip("Double-click to reset Hue to default")
+            hue_sld = QSlider(Qt.Orientation.Horizontal)
+            hue_sld.setRange(0, 360)
+            hue_sld.setValue(default_h)
+            hue_sld.valueChanged.connect(self.on_manual_slider_changed)
 
-        add_section("SHADOWS (L < 0.3)")
-        self.sh_hue_val, self.sh_swatch = add_hue_row("Shadow Hue:")
-        self.sh_sat_val = add_row("Shadow Sat (Tint):")
-        self.sh_light_val = add_row("Shadow Light:")
+            # Saturation Control
+            sat_lbl = ResetLabel("Sat: 0.00")
+            sat_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+            sat_lbl.setToolTip("Double-click to reset Saturation to 0.00")
+            sat_sld = QSlider(Qt.Orientation.Horizontal)
+            sat_sld.setRange(0, 100)
+            sat_sld.setValue(0)
+            sat_sld.valueChanged.connect(self.on_manual_slider_changed)
 
-        add_section("MIDTONES (0.3 - 0.7)")
-        self.mid_hue_val, self.mid_swatch = add_hue_row("Midtone Hue:")
-        self.mid_sat_val = add_row("Midtone Sat (Tint):")
-        self.mid_light_val = add_row("Midtone Light:")
+            # Luminance Control
+            lum_lbl = ResetLabel("Luma: 0.00")
+            lum_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+            lum_lbl.setToolTip("Double-click to reset Luminance to 0.00")
+            lum_sld = QSlider(Qt.Orientation.Horizontal)
+            lum_sld.setRange(-100, 100)
+            lum_sld.setValue(0)
+            lum_sld.valueChanged.connect(self.on_manual_slider_changed)
 
-        add_section("HIGHLIGHTS (L > 0.7)")
-        self.hi_hue_val, self.hi_swatch = add_hue_row("Highlight Hue:")
-        self.hi_sat_val = add_row("Highlight Sat (Tint):")
-        self.hi_light_val = add_row("Highlight Light:")
+            tab_layout.addWidget(hue_lbl)
+            tab_layout.addWidget(hue_sld)
+            tab_layout.addWidget(sat_lbl)
+            tab_layout.addWidget(sat_sld)
+            tab_layout.addWidget(lum_lbl)
+            tab_layout.addWidget(lum_sld)
+            tab_layout.addStretch()
+
+            return tab_widget, hue_sld, hue_lbl, sat_sld, sat_lbl, lum_sld, lum_lbl, swatch_lbl
+
+        # Shadows Tab (default blue 240)
+        sh_tab, self.sh_hue_slider, self.sh_hue_lbl, self.sh_sat_slider, self.sh_sat_lbl, self.sh_light_slider, self.sh_light_lbl, self.sh_swatch_label = create_zone_tab("Shadows", 240)
+        self.tabs.addTab(sh_tab, "Shadows")
+        self.sh_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_hue_slider, 240))
+        self.sh_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_sat_slider, 0))
+        self.sh_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_light_slider, 0))
+        self.sh_swatch_label.clicked.connect(self.pick_shadow_color)
+
+        # Midtones Tab (default green 120)
+        mid_tab, self.mid_hue_slider, self.mid_hue_lbl, self.mid_sat_slider, self.mid_sat_lbl, self.mid_light_slider, self.mid_light_lbl, self.mid_swatch_label = create_zone_tab("Midtones", 120)
+        self.tabs.addTab(mid_tab, "Midtones")
+        self.mid_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_hue_slider, 120))
+        self.mid_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_sat_slider, 0))
+        self.mid_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_light_slider, 0))
+        self.mid_swatch_label.clicked.connect(self.pick_midtone_color)
+
+        # Highlights Tab (default yellow/gold 60)
+        hi_tab, self.hi_hue_slider, self.hi_hue_lbl, self.hi_sat_slider, self.hi_sat_lbl, self.hi_light_slider, self.hi_light_lbl, self.hi_swatch_label = create_zone_tab("Highlights", 60)
+        self.tabs.addTab(hi_tab, "Highlights")
+        self.hi_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_hue_slider, 60))
+        self.hi_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_sat_slider, 0))
+        self.hi_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_light_slider, 0))
+        self.hi_swatch_label.clicked.connect(self.pick_highlight_color)
+
+        # Master Global Controls Section
+        master_widget = QWidget()
+        master_widget.setStyleSheet("border: none; background: transparent;")
+        master_widget.setContentsMargins(0, 0, 0, 0)
+        master_layout = QVBoxLayout(master_widget)
+        master_layout.setSpacing(10)
+        inspector_layout.addWidget(master_widget)
+
+        # Title
+        m_title = QLabel("MASTER DOCK CONTROLS")
+        m_title.setStyleSheet("font-weight: bold; color: #a0a0a0; border: none; border-bottom: 1px solid #444; padding-bottom: 2px;")
+        master_layout.addWidget(m_title)
+
+        # Master Blending
+        self.blending_lbl = ResetLabel("Blending: 0.50")
+        self.blending_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.blending_lbl.setToolTip("Double-click to reset Blending to 0.50")
+        self.blending_slider = QSlider(Qt.Orientation.Horizontal)
+        self.blending_slider.setRange(0, 100)
+        self.blending_slider.setValue(50)
+        self.blending_slider.valueChanged.connect(self.on_manual_slider_changed)
+        self.blending_lbl.doubleClicked.connect(lambda: self.reset_slider(self.blending_slider, 50))
+        
+        # Master Balance
+        self.balance_lbl = ResetLabel("Balance: 0.00")
+        self.balance_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.balance_lbl.setToolTip("Double-click to reset Balance to 0.00")
+        self.balance_slider = QSlider(Qt.Orientation.Horizontal)
+        self.balance_slider.setRange(-100, 100)
+        self.balance_slider.setValue(0)
+        self.balance_slider.valueChanged.connect(self.on_manual_slider_changed)
+        self.balance_lbl.doubleClicked.connect(lambda: self.reset_slider(self.balance_slider, 0))
+
+        master_layout.addWidget(self.blending_lbl)
+        master_layout.addWidget(self.blending_slider)
+        master_layout.addWidget(self.balance_lbl)
+        master_layout.addWidget(self.balance_slider)
 
         inspector_layout.addStretch()
 
-        # 3. Setup Status Bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready. Load a 16-bit TIFF image to begin.")
+        # 3. Setup Status Bar Message via built-in QMainWindow statusBar()
+        self.statusBar().showMessage("Ready. Load a 16-bit TIFF image to begin.")
 
-    def update_inspector_panel(self, state: Optional[StateNode]) -> None:
+    def reset_slider(self, slider: QSlider, value: int) -> None:
         """
-        Updates all text readouts and visual color swatches in the Right-Hand Inspector panel.
+        Helper method to reset a slider back to its default value on label double-click.
         """
-        if state is None:
-            self.mode_val.setText("-")
-            self.step_size_val.setText("-")
-            self.glob_hue_val.setText("-")
-            self.glob_sat_val.setText("-")
-            self.glob_light_val.setText("-")
-            
-            self.sh_hue_val.setText("-")
-            self.sh_swatch.clear()
-            self.sh_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
-            self.sh_sat_val.setText("-")
-            self.sh_light_val.setText("-")
-            
-            self.mid_hue_val.setText("-")
-            self.mid_swatch.clear()
-            self.mid_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
-            self.mid_sat_val.setText("-")
-            self.mid_light_val.setText("-")
-            
-            self.hi_hue_val.setText("-")
-            self.hi_swatch.clear()
-            self.hi_swatch.setStyleSheet("border: 1px solid #444; border-radius: 2px; background-color: #555;")
-            self.hi_sat_val.setText("-")
-            self.hi_light_val.setText("-")
+        slider.setValue(value)
+
+    def on_manual_slider_changed(self) -> None:
+        """
+        Reads values from all manual grading sliders, updates active center StateNode,
+        re-renders center image preview immediately, and updates swatches.
+        Isolates manual changes exclusively to the center image to preserve snappiness.
+        """
+        if self.master_image is None:
             return
 
+        state = self.history_manager.get_current_state()
+        if state is None:
+            return
+
+        # 1. Read values from sliders and update state node
+        state["shadow_hue"] = float(self.sh_hue_slider.value())
+        state["shadow_sat"] = self.sh_sat_slider.value() / 100.0
+        state["shadow_light"] = self.sh_light_slider.value() / 100.0
+
+        state["midtone_hue"] = float(self.mid_hue_slider.value())
+        state["midtone_sat"] = self.mid_sat_slider.value() / 100.0
+        state["midtone_light"] = self.mid_light_slider.value() / 100.0
+
+        state["highlight_hue"] = float(self.hi_hue_slider.value())
+        state["highlight_sat"] = self.hi_sat_slider.value() / 100.0
+        state["highlight_light"] = self.hi_light_slider.value() / 100.0
+
+        state["blending"] = self.blending_slider.value() / 100.0
+        state["balance"] = self.balance_slider.value() / 100.0
+
+        # Update text readouts
+        self.sh_hue_lbl.setText(f"Hue: {state['shadow_hue']:.0f}°")
+        self.sh_sat_lbl.setText(f"Sat: {state['shadow_sat']:.2f}")
+        self.sh_light_lbl.setText(f"Luma: {state['shadow_light']:+.2f}")
+
+        self.mid_hue_lbl.setText(f"Hue: {state['midtone_hue']:.0f}°")
+        self.mid_sat_lbl.setText(f"Sat: {state['midtone_sat']:.2f}")
+        self.mid_light_lbl.setText(f"Luma: {state['midtone_light']:+.2f}")
+
+        self.hi_hue_lbl.setText(f"Hue: {state['highlight_hue']:.0f}°")
+        self.hi_sat_lbl.setText(f"Sat: {state['highlight_sat']:.2f}")
+        self.hi_light_lbl.setText(f"Luma: {state['highlight_light']:+.2f}")
+
+        self.blending_lbl.setText(f"Blending: {state['blending']:.2f}")
+        self.balance_lbl.setText(f"Balance: {state['balance']:+.2f}")
+
+        # 2. Update visual color swatches live
+        self.update_zone_swatches(state)
+
+        # 3. Recalculate and update the center tile immediately!
+        # Applying color grading math to proxy_image for real-time snappy feedback
+        if self.proxy_image is not None:
+            graded_center = apply_grading(self.proxy_image, state)
+            self.containers[4].set_image(graded_center)
+
+    def pick_shadow_color(self) -> None:
+        """
+        Opens QColorDialog to select a shadow tint color, and updates the state.
+        """
+        self.pick_zone_color("shadow_hue", "shadow_sat", self.sh_hue_slider, self.sh_sat_slider, 240.0)
+
+    def pick_midtone_color(self) -> None:
+        """
+        Opens QColorDialog to select a midtone tint color, and updates the state.
+        """
+        self.pick_zone_color("midtone_hue", "midtone_sat", self.mid_hue_slider, self.mid_sat_slider, 120.0)
+
+    def pick_highlight_color(self) -> None:
+        """
+        Opens QColorDialog to select a highlight tint color, and updates the state.
+        """
+        self.pick_zone_color("highlight_hue", "highlight_sat", self.hi_hue_slider, self.hi_sat_slider, 60.0)
+
+    def pick_zone_color(self, hue_key: str, sat_key: str, hue_slider: QSlider, sat_slider: QSlider, default_hue: float) -> None:
+        """
+        Generic helper to open QColorDialog and apply HSL values to sliders.
+        """
+        state = self.history_manager.get_current_state()
+        if state is None:
+            return
+
+        current_hue = state.get(hue_key, default_hue)
+        current_sat = state.get(sat_key, 0.0)
+        initial_color = QColor.fromHslF(current_hue / 360.0, current_sat, 0.5)
+
+        color = QColorDialog.getColor(initial_color, self, "Select Zone Tint Color")
+        if color.isValid():
+            h, s, l, a = color.getHslF()
+            hue = h * 360.0 if h >= 0.0 else current_hue
+            sat = s
+            
+            # Sync sliders
+            self.block_manual_signals(True)
+            hue_slider.setValue(int(hue))
+            sat_slider.setValue(int(sat * 100.0))
+            self.block_manual_signals(False)
+            
+            # Recalculate
+            self.on_manual_slider_changed()
+
+    def update_zone_swatches(self, state: StateNode) -> None:
+        """
+        Updates the three tab color swatches live based on HSL.
+        """
+        from PyQt6.QtGui import QColor, QPixmap
+        
         is_comp = state.get("harmony_mode") == "Complementary"
 
-        self.mode_val.setText(state.get("harmony_mode", "Monochromatic"))
-        self.step_size_val.setText(f"{state.get('step_size', 0.2):.2f}x")
-        self.glob_hue_val.setText(f"{state.get('hue_shift', 0.0):.1f}°")
-        self.glob_sat_val.setText(f"{state.get('sat_shift', 0.0):+.2f}")
-        self.glob_light_val.setText(f"{state.get('light_shift', 0.0):+.2f}")
-        
         # Shadows
-        sh_hue = state.get('shadow_hue', 240.0)
-        sh_sat = 0.15 if is_comp else state.get('shadow_sat', 0.0)
-        self.sh_hue_val.setText(f"{sh_hue:.1f}°")
-        
-        # Robust QPixmap/QColor-based color swatches bypassing stylesheet limitations
+        sh_hue = state.get("shadow_hue", 240.0)
+        sh_sat = 0.15 if is_comp else state.get("shadow_sat", 0.0)
         sh_color = QColor.fromHslF(sh_hue / 360.0, sh_sat, 0.5)
-        sh_pix = QPixmap(24, 12)
+        sh_pix = QPixmap(36, 14)
         sh_pix.fill(sh_color)
-        self.sh_swatch.setPixmap(sh_pix)
-        self.sh_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
+        self.sh_swatch_label.setPixmap(sh_pix)
         
-        self.sh_sat_val.setText(f"{sh_sat:.2f}")
-        self.sh_light_val.setText(f"{state.get('shadow_light', 0.0):+.2f}")
-
         # Midtones
-        mid_hue = state.get('midtone_hue', 120.0)
-        mid_sat = state.get('midtone_sat', 0.0)
-        self.mid_hue_val.setText(f"{mid_hue:.1f}°")
-        
+        mid_hue = state.get("midtone_hue", 120.0)
+        mid_sat = state.get("midtone_sat", 0.0)
         mid_color = QColor.fromHslF(mid_hue / 360.0, mid_sat, 0.5)
-        mid_pix = QPixmap(24, 12)
+        mid_pix = QPixmap(36, 14)
         mid_pix.fill(mid_color)
-        self.mid_swatch.setPixmap(mid_pix)
-        self.mid_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
-        
-        self.mid_sat_val.setText(f"{mid_sat:.2f}")
-        self.mid_light_val.setText(f"{state.get('midtone_light', 0.0):+.2f}")
+        self.mid_swatch_label.setPixmap(mid_pix)
 
         # Highlights
-        hi_hue = state.get('highlight_hue', 60.0)
-        hi_sat = 0.15 if is_comp else state.get('highlight_sat', 0.0)
-        self.hi_hue_val.setText(f"{hi_hue:.1f}°")
-        
+        hi_hue = state.get("highlight_hue", 60.0)
+        hi_sat = 0.15 if is_comp else state.get("highlight_sat", 0.0)
         hi_color = QColor.fromHslF(hi_hue / 360.0, hi_sat, 0.5)
-        hi_pix = QPixmap(24, 12)
+        hi_pix = QPixmap(36, 14)
         hi_pix.fill(hi_color)
-        self.hi_swatch.setPixmap(hi_pix)
-        self.hi_swatch.setStyleSheet("border: 1px solid #666; border-radius: 2px;")
-        
-        self.hi_sat_val.setText(f"{hi_sat:.2f}")
-        self.hi_light_val.setText(f"{state.get('highlight_light', 0.0):+.2f}")
+        self.hi_swatch_label.setPixmap(hi_pix)
+
+    def sync_sliders_with_state(self, state: StateNode) -> None:
+        """
+        Synchronizes all UI sliders and swatches to match the active StateNode parameters.
+        Blocks signals to avoid triggering recursive render events during synchronization.
+        """
+        self.block_manual_signals(True)
+
+        self.sh_hue_slider.setValue(int(state.get("shadow_hue", 240.0)))
+        self.sh_sat_slider.setValue(int(state.get("shadow_sat", 0.0) * 100.0))
+        self.sh_light_slider.setValue(int(state.get("shadow_light", 0.0) * 100.0))
+
+        self.mid_hue_slider.setValue(int(state.get("midtone_hue", 120.0)))
+        self.mid_sat_slider.setValue(int(state.get("midtone_sat", 0.0) * 100.0))
+        self.mid_light_slider.setValue(int(state.get("midtone_light", 0.0) * 100.0))
+
+        self.hi_hue_slider.setValue(int(state.get("highlight_hue", 60.0)))
+        self.hi_sat_slider.setValue(int(state.get("highlight_sat", 0.0) * 100.0))
+        self.hi_light_slider.setValue(int(state.get("highlight_light", 0.0) * 100.0))
+
+        self.blending_slider.setValue(int(state.get("blending", 0.5) * 100.0))
+        self.balance_slider.setValue(int(state.get("balance", 0.0) * 100.0))
+
+        # Update labels readouts
+        self.sh_hue_lbl.setText(f"Hue: {state.get('shadow_hue', 240.0):.0f}°")
+        self.sh_sat_lbl.setText(f"Sat: {state.get('shadow_sat', 0.0):.2f}")
+        self.sh_light_lbl.setText(f"Luma: {state.get('shadow_light', 0.0):+.2f}")
+
+        self.mid_hue_lbl.setText(f"Hue: {state.get('midtone_hue', 120.0):.0f}°")
+        self.mid_sat_lbl.setText(f"Sat: {state.get('midtone_sat', 0.0):.2f}")
+        self.mid_light_lbl.setText(f"Luma: {state.get('midtone_light', 0.0):+.2f}")
+
+        self.hi_hue_lbl.setText(f"Hue: {state.get('highlight_hue', 60.0):.0f}°")
+        self.hi_sat_lbl.setText(f"Sat: {state.get('highlight_sat', 0.0):.2f}")
+        self.hi_light_lbl.setText(f"Luma: {state.get('highlight_light', 0.0):+.2f}")
+
+        self.blending_lbl.setText(f"Blending: {state.get('blending', 0.5):.2f}")
+        self.balance_lbl.setText(f"Balance: {state.get('balance', 0.0):+.2f}")
+
+        self.update_zone_swatches(state)
+
+        self.block_manual_signals(False)
+
+    def block_manual_signals(self, block: bool) -> None:
+        """
+        Helper to block/unblock signals on all manual controls.
+        """
+        self.sh_hue_slider.blockSignals(block)
+        self.sh_sat_slider.blockSignals(block)
+        self.sh_light_slider.blockSignals(block)
+
+        self.mid_hue_slider.blockSignals(block)
+        self.mid_sat_slider.blockSignals(block)
+        self.mid_light_slider.blockSignals(block)
+
+        self.hi_hue_slider.blockSignals(block)
+        self.hi_sat_slider.blockSignals(block)
+        self.hi_light_slider.blockSignals(block)
+
+        self.blending_slider.blockSignals(block)
+        self.balance_slider.blockSignals(block)
 
     def update_recent_directories_menu(self) -> None:
         """
@@ -586,7 +730,7 @@ class MainWindow(QMainWindow):
                 
                 # Initialize history with default state
                 self.history_manager.clear()
-                initial_state = create_default_state(self.harmony_combo.currentText())  # type: ignore
+                initial_state = create_default_state("Monochromatic")
                 self.history_manager.push_state(initial_state)
                 
                 # Render grid
@@ -595,9 +739,9 @@ class MainWindow(QMainWindow):
                 # Update status bar
                 shape_str = "x".join(map(str, self.master_image.shape))
                 proxy_str = "x".join(map(str, self.proxy_image.shape))
-                self.status_bar.showMessage(f"Loaded {file_path} (Master: {shape_str}, Proxy: {proxy_str})")
+                self.statusBar().showMessage(f"Loaded {file_path} (Master: {shape_str}, Proxy: {proxy_str})")
             except Exception as e:
-                self.status_bar.showMessage(f"Error loading image: {str(e)}")
+                self.statusBar().showMessage(f"Error loading image: {str(e)}")
 
     def save_file(self) -> None:
         """
@@ -630,9 +774,9 @@ class MainWindow(QMainWindow):
                 self.mru_manager.add_path(save_path)
                 self.update_recent_directories_menu()
                 
-                self.status_bar.showMessage(f"Successfully saved graded image to {save_path}")
+                self.statusBar().showMessage(f"Successfully saved graded image to {save_path}")
             except Exception as e:
-                self.status_bar.showMessage(f"Error saving image: {str(e)}")
+                self.statusBar().showMessage(f"Error saving image: {str(e)}")
 
     def on_back_clicked(self) -> None:
         """
@@ -641,7 +785,7 @@ class MainWindow(QMainWindow):
         if self.history_manager.can_undo():
             self.history_manager.undo()
             self.render_grid_from_current_state()
-            self.status_bar.showMessage("Undo action.")
+            self.statusBar().showMessage("Undo action.")
 
     def on_forward_clicked(self) -> None:
         """
@@ -650,12 +794,12 @@ class MainWindow(QMainWindow):
         if self.history_manager.can_redo():
             self.history_manager.redo()
             self.render_grid_from_current_state()
-            self.status_bar.showMessage("Redo action.")
+            self.statusBar().showMessage("Redo action.")
 
     def on_harmony_mode_changed(self, text: str) -> None:
         """
         Handler for when the user selects a different harmony mode from the dropdown.
-        Updates the active state's harmony mode and triggers re-generation of outer tiles,
+        Updates active state's harmony mode and triggers re-generation of outer tiles,
         keeping the center image completely untouched.
         """
         if self.master_image is None:
@@ -683,7 +827,7 @@ class MainWindow(QMainWindow):
     def on_intensity_changed(self, value: int) -> None:
         """
         Triggered when the user slides the mutation intensity control.
-        Updates the intensity label, updates the active state's step_size,
+        Updates the intensity label, updates active state's step_size,
         and triggers a progressive re-render of the 8 surrounding outer tiles.
         """
         step_size = value / 100.0
@@ -695,30 +839,23 @@ class MainWindow(QMainWindow):
         state = self.history_manager.get_current_state()
         if state is not None:
             state["step_size"] = step_size
-            self.update_inspector_panel(state)
             # Re-render outer tiles only, keeping the center invariant
             self.start_asynchronous_render_for_state(state, skip_center=True)
 
     def get_active_mutation_axis(self) -> MutationAxis:
         """
-        Returns the string key of the active mutation axis.
+        Returns the active mutation axis. Defaults to 'All' now that controls are removed.
         """
-        if self.radio_hue.isChecked():
-            return "Hue"
-        elif self.radio_sat.isChecked():
-            return "Saturation"
-        elif self.radio_lum.isChecked():
-            return "Luminance"
         return "All"
 
     def render_grid_from_current_state(self) -> None:
         """
-        Renders all 9 containers asynchronously from the current active state in history.
+        Renders all 9 containers asynchronously from current active state in history.
         """
         state = self.history_manager.get_current_state()
         if state is not None:
             self.start_asynchronous_render_for_state(state, skip_center=False)
-            self.update_inspector_panel(state)
+            self.sync_sliders_with_state(state)
 
     def start_asynchronous_render_for_state(self, state: StateNode, skip_center: bool = False) -> None:
         """
@@ -728,12 +865,8 @@ class MainWindow(QMainWindow):
         if self.proxy_image is None:
             return
 
-        # 1. Sync the UI controls with the state parameters if we are loading/undoing/redoing
+        # 1. Sync intensity slider only if skip_center is False (load/undo/redo)
         if not skip_center:
-            self.harmony_combo.blockSignals(True)
-            self.harmony_combo.setCurrentText(state["harmony_mode"])
-            self.harmony_combo.blockSignals(False)
-            
             self.intensity_slider.blockSignals(True)
             self.intensity_slider.setValue(int(state.get("step_size", 0.2) * 100.0))
             self.intensity_slider.blockSignals(False)
@@ -745,13 +878,10 @@ class MainWindow(QMainWindow):
         self.save_action.setEnabled(True)
         self.history_label.setText(self.history_manager.get_history_display_text())
 
-        # 3. Generate the 9 state nodes for the grid using active UI mode and axis
-        active_mode = self.harmony_combo.currentText()  # type: ignore
-        axis = self.get_active_mutation_axis()
-        mutations = generate_mutations(state, active_mode, axis=axis)
+        # 3. Generate the 9 state nodes for the grid using current state's active mode
+        mutations = generate_mutations(state, state.get("harmony_mode", "Monochromatic"), axis="All")
         
         # Lock index 4 to be EXACTLY the original unchanged history state!
-        # This guarantees center image invariance on dropdown/axis changes!
         mutations[4] = state.copy()
         self.grid_states = mutations
 
@@ -784,7 +914,7 @@ class MainWindow(QMainWindow):
         """
         Updates the status bar when all outer mutations are finished processing.
         """
-        self.status_bar.showMessage("Ready.")
+        self.statusBar().showMessage("Ready.")
 
     def on_container_clicked(self, index: int) -> None:
         """
@@ -797,7 +927,7 @@ class MainWindow(QMainWindow):
 
         if index == 4:
             # Clicking the center image tile triggers a re-roll of the 8 outer tiles
-            self.status_bar.showMessage("Re-rolling mutation proposals around center...")
+            self.statusBar().showMessage("Re-rolling mutation proposals around center...")
             state = self.history_manager.get_current_state()
             if state is not None:
                 # Clear all surrounding cells immediately to give instant visual feedback that a re-roll has begun
@@ -828,12 +958,12 @@ class MainWindow(QMainWindow):
 
         # 3. Push the new state to history
         self.history_manager.push_state(chosen_state)
-        self.update_inspector_panel(chosen_state)
+        self.sync_sliders_with_state(chosen_state)
 
         # 4. Fire up background asynchronous worker to render other 8 tiles progressively, skipping the center!
         self.start_asynchronous_render_for_state(chosen_state, skip_center=True)
         
-        self.status_bar.showMessage(f"Promoted mutation {index} to center immediately. Computing new mutations...")
+        self.statusBar().showMessage(f"Promoted mutation {index} to center immediately. Computing new mutations...")
 
     def closeEvent(self, event) -> None:
         """
