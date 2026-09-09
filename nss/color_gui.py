@@ -292,7 +292,7 @@ class ColorSwatch(QLabel):
     def update_color(self, hue: float, sat: float) -> None:
         self.hue = float(hue)
         self.sat = float(sat)
-        color = QColor.fromHslF(self.hue / 360.0, self.sat, 0.5)
+        color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
         self.setStyleSheet(
             f"border: 1px solid #555; border-radius: 4px; "
             f"background-color: {color.name()};"
@@ -772,7 +772,7 @@ class MainWindow(QMainWindow):
 
         current_hue = state.get(hue_key, default_hue)
         current_sat = state.get(sat_key, 0.0)
-        initial_color = QColor.fromHslF(current_hue / 360.0, current_sat, 0.5)
+        initial_color = QColor.fromHslF(current_hue / 360.0, current_sat, 1.0 - 0.5 * current_sat)
 
         color = QColorDialog.getColor(initial_color, self, "Select Zone Tint Color")
         if color.isValid():
@@ -879,7 +879,7 @@ class MainWindow(QMainWindow):
         # Shadows
         sh_hue = state.get("shadow_hue", 240.0)
         sh_sat = 0.15 if is_comp else state.get("shadow_sat", 0.0)
-        sh_color = QColor.fromHslF(sh_hue / 360.0, sh_sat, 0.5)
+        sh_color = QColor.fromHslF(sh_hue / 360.0, sh_sat, 1.0 - 0.5 * sh_sat)
         sh_pix = QPixmap(36, 14)
         sh_pix.fill(sh_color)
         self.sh_swatch_label.setPixmap(sh_pix)
@@ -887,7 +887,7 @@ class MainWindow(QMainWindow):
         # Midtones
         mid_hue = state.get("midtone_hue", 120.0)
         mid_sat = state.get("midtone_sat", 0.0)
-        mid_color = QColor.fromHslF(mid_hue / 360.0, mid_sat, 0.5)
+        mid_color = QColor.fromHslF(mid_hue / 360.0, mid_sat, 1.0 - 0.5 * mid_sat)
         mid_pix = QPixmap(36, 14)
         mid_pix.fill(mid_color)
         self.mid_swatch_label.setPixmap(mid_pix)
@@ -895,7 +895,7 @@ class MainWindow(QMainWindow):
         # Highlights
         hi_hue = state.get("highlight_hue", 60.0)
         hi_sat = 0.15 if is_comp else state.get("highlight_sat", 0.0)
-        hi_color = QColor.fromHslF(hi_hue / 360.0, hi_sat, 0.5)
+        hi_color = QColor.fromHslF(hi_hue / 360.0, hi_sat, 1.0 - 0.5 * hi_sat)
         hi_pix = QPixmap(36, 14)
         hi_pix.fill(hi_color)
         self.hi_swatch_label.setPixmap(hi_pix)

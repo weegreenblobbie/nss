@@ -99,3 +99,40 @@ def test_color_wheel_mouse_coordinate_mapping() -> None:
     pos_bottom_left = QPointF(cx - 30.0, cy + 30.0)
     wheel._update_color_from_mouse(pos_bottom_left)
     assert abs(wheel.hue - 225.0) < 1.0
+
+def test_color_math_boundary_interpolation_and_white_desaturation() -> None:
+    # Set up QApplication if not already created
+    app = QApplication.instance() or QApplication([])
+
+    # 1. Test white desaturation formula on swatches
+    swatch = ColorSwatch(180.0, 0.0)
+    # Color should be pure white when saturation is 0.0 (lightness = 1.0)
+    from PyQt6.QtGui import QColor
+    color = QColor.fromHslF(180.0 / 360.0, 0.0, 1.0)
+    assert color.name() in swatch.styleSheet()
+
+    # 2. Test 0/360 circular boundary interpolation in apply_grading
+    # Set up a simple 1x1 image
+    import numpy as np
+    from nss.color_math import apply_grading, create_default_state
+    img = np.zeros((1, 1, 3), dtype=np.float32)
+    img[0, 0] = [0.5, 0.5, 0.5] # gray
+    
+    # State with shadows at 359° and highlights at 1°
+    state = create_default_state("Monochromatic")
+    state["shadow_hue"] = 359.0
+    state["shadow_sat"] = 0.5
+    state["midtone_sat"] = 0.0
+    state["highlight_hue"] = 1.0
+    state["highlight_sat"] = 0.5
+    state["balance"] = 0.0 # Equal weight
+    state["blending"] = 0.5
+    
+    graded = apply_grading(img, state)
+    import cv2
+    hls_graded = cv2.cvtColor(graded, cv2.COLOR_RGB2HLS)
+    hue = hls_graded[0, 0, 0]
+    
+    # Direct average would be 180 (Cyan). Correct circular average is ~0.0 (Red).
+    # Since 359° and 1° are symmetric, the result must be very close to 0.0 / 360.0.
+    assert hue < 2.0 or hue > 358.0

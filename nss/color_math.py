@@ -126,12 +126,26 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     
     tint_mask = total_tint_weight > 0.0
     if np.any(tint_mask):
-        # Calculate target Hue via weighted interpolation
-        target_h = (
-            (shadow_weight[tint_mask] * sh_sat * sh_hue) +
-            (midtone_weight[tint_mask] * mid_sat * mid_hue) +
-            (highlight_weight[tint_mask] * hi_sat * hi_hue)
-        ) / total_tint_weight[tint_mask]
+        # Convert target zone hues to radians for robust circular vector interpolation
+        sh_hue_rad = np.radians(sh_hue)
+        mid_hue_rad = np.radians(mid_hue)
+        hi_hue_rad = np.radians(hi_hue)
+
+        # Compute weighted sum of 2D Cartesian vector components to avoid 0/360 boundary leaps
+        x_comp = (
+            (shadow_weight[tint_mask] * sh_sat * np.cos(sh_hue_rad)) +
+            (midtone_weight[tint_mask] * mid_sat * np.cos(mid_hue_rad)) +
+            (highlight_weight[tint_mask] * hi_sat * np.cos(hi_hue_rad))
+        )
+        y_comp = (
+            (shadow_weight[tint_mask] * sh_sat * np.sin(sh_hue_rad)) +
+            (midtone_weight[tint_mask] * mid_sat * np.sin(mid_hue_rad)) +
+            (highlight_weight[tint_mask] * hi_sat * np.sin(hi_hue_rad))
+        )
+
+        # Reconstruct target Hue via arctan2 and convert back to [0, 360) degrees
+        target_h_rad = np.arctan2(y_comp, x_comp)
+        target_h = np.degrees(target_h_rad) % 360.0
         
         # Set Hue channel directly to target Hue to prevent muddy partial hue shifts
         H[tint_mask] = target_h
