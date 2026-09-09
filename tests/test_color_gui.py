@@ -79,3 +79,23 @@ def test_main_window_color_methods() -> None:
     assert new_sh_colors[0] == [210.0, 0.25]
     # Check deduplication / limit
     assert len(new_sh_colors) == 8
+
+def test_color_wheel_mouse_coordinate_mapping() -> None:
+    app = QApplication.instance() or QApplication([])
+    
+    wheel = ColorWheel()
+    
+    cx = wheel.width() / 2.0
+    cy = wheel.height() / 2.0
+    
+    # Top-Left quadrant (Green area: dx = -30, dy = -30)
+    # angle_rad = atan2(-dy, dx) = atan2(30, -30) = 135 degrees (Green)
+    pos_top_left = QPointF(cx - 30.0, cy - 30.0)
+    wheel._update_color_from_mouse(pos_top_left)
+    assert abs(wheel.hue - 135.0) < 1.0
+    
+    # Bottom-Left quadrant (Blue area: dx = -30, dy = 30)
+    # angle_rad = atan2(-dy, dx) = atan2(-30, -30) = -135 degrees = 225 degrees (Blue)
+    pos_bottom_left = QPointF(cx - 30.0, cy + 30.0)
+    wheel._update_color_from_mouse(pos_bottom_left)
+    assert abs(wheel.hue - 225.0) < 1.0

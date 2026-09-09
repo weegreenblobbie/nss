@@ -224,7 +224,7 @@ class ColorWheel(QWidget):
         angle_rad = math.radians(self.hue)
         d = self.sat * radius
         px = cx + d * math.cos(angle_rad)
-        py = cy + d * math.sin(angle_rad)
+        py = cy - d * math.sin(angle_rad)
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(Qt.GlobalColor.black, 2))
@@ -250,7 +250,7 @@ class ColorWheel(QWidget):
         if d == 0:
             hue = self.hue
         else:
-            angle_rad = math.atan2(dy, dx)
+            angle_rad = math.atan2(-dy, dx)
             angle_deg = math.degrees(angle_rad)
             if angle_deg < 0:
                 angle_deg += 360.0
