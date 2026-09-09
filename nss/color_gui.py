@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QColorDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSettings, QPointF
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSettings, QPointF, QMimeData
 from PyQt6.QtGui import (
     QMouseEvent,
     QAction,
@@ -28,6 +28,7 @@ from PyQt6.QtGui import (
     QConicalGradient,
     QRadialGradient,
     QPen,
+    QDrag,
 )
 
 from nss.utils import TiffFile
@@ -157,13 +158,36 @@ class ResetLabel(QLabel):
 
 class ClickableSwatchLabel(QLabel):
     """
-    A custom QLabel that acts as a clickable color swatch to open QColorDialog.
+    A custom QLabel that acts as a draggable active color swatch.
     """
-    clicked = pyqtSignal()
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.hue: float = 0.0
+        self.sat: float = 0.0
+        self.drag_start_position = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            self.drag_start_position = event.position()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if self.drag_start_position is None:
+            return
+        from PyQt6.QtWidgets import QApplication
+        if (event.position() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setText(f"{self.hue},{self.sat}")
+        drag.setMimeData(mime_data)
+
+        pixmap = self.pixmap()
+        if pixmap and not pixmap.isNull():
+            drag.setPixmap(pixmap)
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 class ColorWheel(QWidget):
@@ -277,16 +301,20 @@ class ColorWheel(QWidget):
 
 class ColorSwatch(QLabel):
     """
-    A custom color swatch that displays an HSL color and emits a clicked signal.
+    A custom color swatch that displays an HSL color, emits a clicked signal,
+    and supports drag-and-drop to overwrite its color with the dragged color.
     """
     clicked = pyqtSignal(float, float)  # Emits (hue, saturation)
+    overwritten = pyqtSignal(int, float, float)  # Emits (index, hue, saturation)
 
     def __init__(self, hue: float = 0.0, sat: float = 0.0, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.hue: float = hue
         self.sat: float = sat
+        self.index: int = 0
         self.setFixedSize(24, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAcceptDrops(True)
         self.update_color(hue, sat)
 
     def update_color(self, hue: float, sat: float) -> None:
@@ -302,6 +330,22 @@ class ColorSwatch(QLabel):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.hue, self.sat)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        text = event.mimeData().text()
+        try:
+            hue_str, sat_str = text.split(",")
+            hue = float(hue_str)
+            sat = float(sat_str)
+            self.update_color(hue, sat)
+            self.overwritten.emit(self.index, hue, sat)
+            event.acceptProposedAction()
+        except Exception:
+            pass
 
 
 class GradingWorker(QThread):
@@ -580,31 +624,25 @@ class MainWindow(QMainWindow):
         sh_tab, self.sh_wheel, self.sh_hue_lbl, self.sh_sat_slider, self.sh_sat_lbl, self.sh_light_slider, self.sh_light_lbl, self.sh_swatch_label, self.sh_history_grid = create_zone_tab("Shadows", 240)
         self.tabs.addTab(sh_tab, "Shadows")
         self.sh_wheel.colorChanged.connect(self.on_sh_wheel_changed)
-        self.sh_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("shadows", h, s))
         self.sh_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.sh_wheel, 240))
         self.sh_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_sat_slider, 0))
         self.sh_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_light_slider, 0))
-        self.sh_swatch_label.clicked.connect(self.pick_shadow_color)
 
         # Midtones Tab (default green 120)
         mid_tab, self.mid_wheel, self.mid_hue_lbl, self.mid_sat_slider, self.mid_sat_lbl, self.mid_light_slider, self.mid_light_lbl, self.mid_swatch_label, self.mid_history_grid = create_zone_tab("Midtones", 120)
         self.tabs.addTab(mid_tab, "Midtones")
         self.mid_wheel.colorChanged.connect(self.on_mid_wheel_changed)
-        self.mid_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("midtones", h, s))
         self.mid_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.mid_wheel, 120))
         self.mid_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_sat_slider, 0))
         self.mid_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_light_slider, 0))
-        self.mid_swatch_label.clicked.connect(self.pick_midtone_color)
 
         # Highlights Tab (default yellow/gold 60)
         hi_tab, self.hi_wheel, self.hi_hue_lbl, self.hi_sat_slider, self.hi_sat_lbl, self.hi_light_slider, self.hi_light_lbl, self.hi_swatch_label, self.hi_history_grid = create_zone_tab("Highlights", 60)
         self.tabs.addTab(hi_tab, "Highlights")
         self.hi_wheel.colorChanged.connect(self.on_hi_wheel_changed)
-        self.hi_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("highlights", h, s))
         self.hi_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.hi_wheel, 60))
         self.hi_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_sat_slider, 0))
         self.hi_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_light_slider, 0))
-        self.hi_swatch_label.clicked.connect(self.pick_highlight_color)
 
         # Populate custom color history grids from settings
         self.update_history_swatches_ui("shadows", self.load_custom_colors("shadows"))
@@ -789,26 +827,46 @@ class MainWindow(QMainWindow):
             # Recalculate
             self.on_manual_slider_changed()
 
-            # Add to rolling history
-            zone_name = hue_key.split("_")[0] + "s"
-            self.add_custom_color(zone_name, hue, sat)
-
     def load_custom_colors(self, zone: str) -> list:
         settings = QSettings("NSS", "ColorGradingExplorer")
         data = settings.value(f"history_grid_{zone}")
         if data:
             try:
-                return json.loads(str(data))
+                res = json.loads(str(data))
+                if len(res) == 16:
+                    return res
+                if len(res) > 16:
+                    return res[:16]
+                else:
+                    defaults = self.get_default_colors(zone)
+                    return res + defaults[len(res):]
             except Exception:
                 pass
                 
-        # Fallback to defaults
+        return self.get_default_colors(zone)
+
+    def get_default_colors(self, zone: str) -> list:
         if zone == "shadows":
-            return [[240.0, 0.0], [240.0, 0.1], [240.0, 0.2], [240.0, 0.3], [200.0, 0.1], [200.0, 0.2], [270.0, 0.1], [270.0, 0.2]]
+            return [
+                [240.0, 0.0], [240.0, 0.1], [240.0, 0.2], [240.0, 0.3],
+                [240.0, 0.4], [240.0, 0.5], [200.0, 0.1], [200.0, 0.2],
+                [200.0, 0.3], [200.0, 0.4], [270.0, 0.1], [270.0, 0.2],
+                [270.0, 0.3], [270.0, 0.4], [180.0, 0.1], [180.0, 0.2]
+            ]
         elif zone == "midtones":
-            return [[120.0, 0.0], [120.0, 0.1], [120.0, 0.2], [120.0, 0.3], [80.0, 0.1], [80.0, 0.2], [160.0, 0.1], [160.0, 0.2]]
+            return [
+                [120.0, 0.0], [120.0, 0.1], [120.0, 0.2], [120.0, 0.3],
+                [120.0, 0.4], [120.0, 0.5], [80.0, 0.1], [80.0, 0.2],
+                [80.0, 0.3], [80.0, 0.4], [160.0, 0.1], [160.0, 0.2],
+                [160.0, 0.3], [160.0, 0.4], [100.0, 0.1], [100.0, 0.2]
+            ]
         else:
-            return [[60.0, 0.0], [60.0, 0.1], [60.0, 0.2], [60.0, 0.3], [30.0, 0.1], [30.0, 0.2], [90.0, 0.1], [90.0, 0.2]]
+            return [
+                [60.0, 0.0], [60.0, 0.1], [60.0, 0.2], [60.0, 0.3],
+                [60.0, 0.4], [60.0, 0.5], [30.0, 0.1], [30.0, 0.2],
+                [30.0, 0.3], [30.0, 0.4], [90.0, 0.1], [90.0, 0.2],
+                [90.0, 0.3], [90.0, 0.4], [45.0, 0.1], [45.0, 0.2]
+            ]
 
     def add_custom_color(self, zone: str, hue: float, sat: float) -> None:
         h = float(round(hue)) % 360
@@ -823,7 +881,7 @@ class MainWindow(QMainWindow):
             new_history.append(item)
             
         new_history.insert(0, [h, s])
-        new_history = new_history[:8]
+        new_history = new_history[:16]
         
         settings = QSettings("NSS", "ColorGradingExplorer")
         settings.setValue(f"history_grid_{zone}", json.dumps(new_history))
@@ -844,10 +902,12 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
         for i, (h, s) in enumerate(history):
-            row = i // 4
-            col = i % 4
+            row = i // 8
+            col = i % 8
             swatch = ColorSwatch(h, s, self)
+            swatch.index = i
             swatch.clicked.connect(lambda hue, sat, z=zone: self.on_swatch_clicked(z, hue, sat))
+            swatch.overwritten.connect(lambda idx, hue, sat, z=zone: self.on_swatch_overwritten(z, idx, hue, sat))
             grid.addWidget(swatch, row, col)
 
     def on_swatch_clicked(self, zone: str, hue: float, sat: float) -> None:
@@ -868,9 +928,16 @@ class MainWindow(QMainWindow):
 
         self.on_manual_slider_changed()
 
+    def on_swatch_overwritten(self, zone: str, index: int, hue: float, sat: float) -> None:
+        history = self.load_custom_colors(zone)
+        if index < len(history):
+            history[index] = [float(round(hue)) % 360, float(round(sat, 2))]
+            settings = QSettings("NSS", "ColorGradingExplorer")
+            settings.setValue(f"history_grid_{zone}", json.dumps(history))
+
     def update_zone_swatches(self, state: StateNode) -> None:
         """
-        Updates the three tab color swatches live based on HSL.
+        Updates the three tab color swatches live based on HSL and updates draggable state.
         """
         from PyQt6.QtGui import QColor, QPixmap
         
@@ -883,6 +950,8 @@ class MainWindow(QMainWindow):
         sh_pix = QPixmap(36, 14)
         sh_pix.fill(sh_color)
         self.sh_swatch_label.setPixmap(sh_pix)
+        self.sh_swatch_label.hue = sh_hue
+        self.sh_swatch_label.sat = sh_sat
         
         # Midtones
         mid_hue = state.get("midtone_hue", 120.0)
@@ -891,6 +960,8 @@ class MainWindow(QMainWindow):
         mid_pix = QPixmap(36, 14)
         mid_pix.fill(mid_color)
         self.mid_swatch_label.setPixmap(mid_pix)
+        self.mid_swatch_label.hue = mid_hue
+        self.mid_swatch_label.sat = mid_sat
 
         # Highlights
         hi_hue = state.get("highlight_hue", 60.0)
@@ -899,6 +970,8 @@ class MainWindow(QMainWindow):
         hi_pix = QPixmap(36, 14)
         hi_pix.fill(hi_color)
         self.hi_swatch_label.setPixmap(hi_pix)
+        self.hi_swatch_label.hue = hi_hue
+        self.hi_swatch_label.sat = hi_sat
 
     def sync_sliders_with_state(self, state: StateNode) -> None:
         """

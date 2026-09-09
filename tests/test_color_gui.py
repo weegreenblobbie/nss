@@ -5,7 +5,7 @@ from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
-from nss.color_gui import ColorWheel, ColorSwatch, MainWindow
+from nss.color_gui import ColorWheel, ColorSwatch, MainWindow, ClickableSwatchLabel
 
 class MockQSettings:
     _store = {}
@@ -62,15 +62,15 @@ def test_main_window_color_methods() -> None:
     
     # Test default history lists
     sh_colors = window.load_custom_colors("shadows")
-    assert len(sh_colors) == 8
+    assert len(sh_colors) == 16
     assert sh_colors[0] == [240.0, 0.0]
 
     mid_colors = window.load_custom_colors("midtones")
-    assert len(mid_colors) == 8
+    assert len(mid_colors) == 16
     assert mid_colors[0] == [120.0, 0.0]
 
     hi_colors = window.load_custom_colors("highlights")
-    assert len(hi_colors) == 8
+    assert len(hi_colors) == 16
     assert hi_colors[0] == [60.0, 0.0]
 
     # Test adding to custom color history
@@ -78,7 +78,7 @@ def test_main_window_color_methods() -> None:
     new_sh_colors = window.load_custom_colors("shadows")
     assert new_sh_colors[0] == [210.0, 0.25]
     # Check deduplication / limit
-    assert len(new_sh_colors) == 8
+    assert len(new_sh_colors) == 16
 
 def test_color_wheel_mouse_coordinate_mapping() -> None:
     app = QApplication.instance() or QApplication([])
@@ -136,3 +136,51 @@ def test_color_math_boundary_interpolation_and_white_desaturation() -> None:
     # Direct average would be 180 (Cyan). Correct circular average is ~0.0 (Red).
     # Since 359° and 1° are symmetric, the result must be very close to 0.0 / 360.0.
     assert hue < 2.0 or hue > 358.0
+
+def test_color_swatch_drag_and_drop() -> None:
+    app = QApplication.instance() or QApplication([])
+
+    # Create a draggable ClickableSwatchLabel
+    active_swatch = ClickableSwatchLabel()
+    active_swatch.hue = 300.0
+    active_swatch.sat = 0.75
+
+    # Create a drop-accepting ColorSwatch
+    grid_swatch = ColorSwatch(120.0, 0.5)
+    grid_swatch.index = 3
+
+    # Connect to check overridden signals
+    overwritten_data = []
+    grid_swatch.overwritten.connect(lambda idx, h, s: overwritten_data.append((idx, h, s)))
+
+    # Simulate Drop
+    from PyQt6.QtCore import QMimeData
+    from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QDrag
+    
+    # Setup Mime Data
+    mime_data = QMimeData()
+    mime_data.setText("300.0,0.75")
+
+    # Simulate drag enter
+    # On PyQt6 we can create mock events or call dropEvent directly to test the behavior
+    # Calling dropEvent with a mock event carrying mime_data is extremely clean
+    class MockEvent:
+        def __init__(self, mime):
+            self._mime = mime
+            self.proposed_accepted = False
+
+        def mimeData(self):
+            return self._mime
+
+        def acceptProposedAction(self):
+            self.proposed_accepted = True
+
+    mock_event = MockEvent(mime_data)
+    grid_swatch.dropEvent(mock_event)
+
+    # Verify that the color swatch is updated with the dragged color
+    assert grid_swatch.hue == 300.0
+    assert grid_swatch.sat == 0.75
+    assert mock_event.proposed_accepted
+    assert overwritten_data == [(3, 300.0, 0.75)]
+
