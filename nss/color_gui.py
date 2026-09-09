@@ -1,4 +1,6 @@
 import numpy as np
+import json
+import math
 from typing import List, Optional
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -15,8 +17,18 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QColorDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
-from PyQt6.QtGui import QMouseEvent, QAction, QImage, QPixmap, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSettings, QPointF
+from PyQt6.QtGui import (
+    QMouseEvent,
+    QAction,
+    QImage,
+    QPixmap,
+    QColor,
+    QPainter,
+    QConicalGradient,
+    QRadialGradient,
+    QPen,
+)
 
 from nss.utils import TiffFile
 from nss.color_math import (
@@ -152,6 +164,144 @@ class ClickableSwatchLabel(QLabel):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
+
+
+class ColorWheel(QWidget):
+    """
+    A custom circular color wheel widget.
+    Paints Hue using a conical gradient and Saturation using a radial gradient.
+    """
+    colorChanged = pyqtSignal(float, float)  # Emits (hue, saturation)
+    interactionFinished = pyqtSignal(float, float)  # Emits (hue, saturation) when mouse is released
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.hue: float = 0.0  # Range: [0.0, 360.0]
+        self.sat: float = 0.0  # Range: [0.0, 1.0]
+        self.setMinimumSize(120, 120)
+        self.setMaximumSize(180, 180)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def set_color(self, hue: float, sat: float) -> None:
+        """
+        Updates the internal color state and schedules a repaint. Does not emit signals.
+        """
+        self.hue = float(hue) % 360.0
+        self.sat = float(np.clip(sat, 0.0, 1.0))
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect()
+        size = min(rect.width(), rect.height()) - 10
+        cx = rect.width() / 2.0
+        cy = rect.height() / 2.0
+        radius = size / 2.0
+
+        if radius <= 0:
+            return
+
+        # 1. Paint conical gradient (Hue spectrum)
+        conical = QConicalGradient(cx, cy, 0.0)
+        for i in range(361):
+            conical.setColorAt(i / 360.0, QColor.fromHslF(i / 360.0, 1.0, 0.5))
+        
+        painter.setBrush(conical)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(int(cx - radius), int(cy - radius), int(radius * 2), int(radius * 2))
+
+        # 2. Paint radial gradient (Saturation overlay)
+        radial = QRadialGradient(cx, cy, radius)
+        radial.setColorAt(0.0, QColor(255, 255, 255, 255))
+        radial.setColorAt(1.0, QColor(255, 255, 255, 0))
+
+        painter.setBrush(radial)
+        painter.drawEllipse(int(cx - radius), int(cy - radius), int(radius * 2), int(radius * 2))
+
+        # 3. Draw indicator/handle
+        angle_rad = math.radians(self.hue)
+        d = self.sat * radius
+        px = cx + d * math.cos(angle_rad)
+        py = cy + d * math.sin(angle_rad)
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Qt.GlobalColor.black, 2))
+        painter.drawEllipse(QPointF(px, py), 5.0, 5.0)
+        painter.setPen(QPen(Qt.GlobalColor.white, 1))
+        painter.drawEllipse(QPointF(px, py), 4.0, 4.0)
+
+    def _update_color_from_mouse(self, pos: QPointF) -> None:
+        rect = self.rect()
+        cx = rect.width() / 2.0
+        cy = rect.height() / 2.0
+        size = min(rect.width(), rect.height()) - 10
+        radius = size / 2.0
+
+        if radius <= 0:
+            return
+
+        dx = pos.x() - cx
+        dy = pos.y() - cy
+        d = math.sqrt(dx*dx + dy*dy)
+
+        sat = min(1.0, d / radius)
+        if d == 0:
+            hue = self.hue
+        else:
+            angle_rad = math.atan2(dy, dx)
+            angle_deg = math.degrees(angle_rad)
+            if angle_deg < 0:
+                angle_deg += 360.0
+            hue = angle_deg
+
+        self.hue = hue
+        self.sat = sat
+        self.update()
+        self.colorChanged.emit(self.hue, self.sat)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._update_color_from_mouse(event.position())
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._update_color_from_mouse(event.position())
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._update_color_from_mouse(event.position())
+            self.interactionFinished.emit(self.hue, self.sat)
+
+
+class ColorSwatch(QLabel):
+    """
+    A custom color swatch that displays an HSL color and emits a clicked signal.
+    """
+    clicked = pyqtSignal(float, float)  # Emits (hue, saturation)
+
+    def __init__(self, hue: float = 0.0, sat: float = 0.0, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.hue: float = hue
+        self.sat: float = sat
+        self.setFixedSize(24, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_color(hue, sat)
+
+    def update_color(self, hue: float, sat: float) -> None:
+        self.hue = float(hue)
+        self.sat = float(sat)
+        color = QColor.fromHslF(self.hue / 360.0, self.sat, 0.5)
+        self.setStyleSheet(
+            f"border: 1px solid #555; border-radius: 4px; "
+            f"background-color: {color.name()};"
+        )
+        self.setToolTip(f"Hue: {self.hue:.0f}°, Sat: {self.sat:.2f}")
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.hue, self.sat)
 
 
 class GradingWorker(QThread):
@@ -355,11 +505,11 @@ class MainWindow(QMainWindow):
         inspector_layout.addWidget(self.tabs)
 
         # Tab Helper Function
-        def create_zone_tab(title_prefix: str, default_h: int) -> tuple[QWidget, QSlider, ResetLabel, QSlider, ResetLabel, QSlider, ResetLabel, ClickableSwatchLabel]:
+        def create_zone_tab(title_prefix: str, default_h: int) -> tuple[QWidget, ColorWheel, ResetLabel, QSlider, ResetLabel, QSlider, ResetLabel, ClickableSwatchLabel, QGridLayout]:
             tab_widget = QWidget()
             tab_layout = QVBoxLayout(tab_widget)
-            tab_layout.setContentsMargins(12, 12, 12, 12)
-            tab_layout.setSpacing(8)
+            tab_layout.setContentsMargins(10, 10, 10, 10)
+            tab_layout.setSpacing(5)
 
             # Top Header Row with Swatch Label
             top_row = QHBoxLayout()
@@ -375,16 +525,20 @@ class MainWindow(QMainWindow):
             top_row.addWidget(swatch_lbl)
             tab_layout.addLayout(top_row)
 
-            # Hue Control (Double click label to reset to default)
+            # 1. Color Wheel
+            wheel = ColorWheel()
+            wheel_container = QHBoxLayout()
+            wheel_container.addStretch()
+            wheel_container.addWidget(wheel)
+            wheel_container.addStretch()
+            tab_layout.addLayout(wheel_container)
+
+            # 2. Hue Control (Double click label to reset to default)
             hue_lbl = ResetLabel(f"Hue: {default_h}°")
             hue_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
             hue_lbl.setToolTip("Double-click to reset Hue to default")
-            hue_sld = QSlider(Qt.Orientation.Horizontal)
-            hue_sld.setRange(0, 360)
-            hue_sld.setValue(default_h)
-            hue_sld.valueChanged.connect(self.on_manual_slider_changed)
 
-            # Saturation Control
+            # 3. Saturation Control
             sat_lbl = ResetLabel("Sat: 0.00")
             sat_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
             sat_lbl.setToolTip("Double-click to reset Saturation to 0.00")
@@ -393,7 +547,7 @@ class MainWindow(QMainWindow):
             sat_sld.setValue(0)
             sat_sld.valueChanged.connect(self.on_manual_slider_changed)
 
-            # Luminance Control
+            # 4. Luminance Control
             lum_lbl = ResetLabel("Luma: 0.00")
             lum_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
             lum_lbl.setToolTip("Double-click to reset Luminance to 0.00")
@@ -403,38 +557,59 @@ class MainWindow(QMainWindow):
             lum_sld.valueChanged.connect(self.on_manual_slider_changed)
 
             tab_layout.addWidget(hue_lbl)
-            tab_layout.addWidget(hue_sld)
             tab_layout.addWidget(sat_lbl)
             tab_layout.addWidget(sat_sld)
             tab_layout.addWidget(lum_lbl)
             tab_layout.addWidget(lum_sld)
+
+            # 5. Recent Colors Grid
+            recent_lbl = QLabel("Recent Custom Colors:")
+            recent_lbl.setStyleSheet("color: #aaa; font-size: 10px; font-weight: bold; margin-top: 5px;")
+            tab_layout.addWidget(recent_lbl)
+
+            grid_widget = QWidget()
+            grid_layout = QGridLayout(grid_widget)
+            grid_layout.setContentsMargins(0, 2, 0, 2)
+            grid_layout.setSpacing(4)
+            tab_layout.addWidget(grid_widget)
             tab_layout.addStretch()
 
-            return tab_widget, hue_sld, hue_lbl, sat_sld, sat_lbl, lum_sld, lum_lbl, swatch_lbl
+            return tab_widget, wheel, hue_lbl, sat_sld, sat_lbl, lum_sld, lum_lbl, swatch_lbl, grid_layout
 
         # Shadows Tab (default blue 240)
-        sh_tab, self.sh_hue_slider, self.sh_hue_lbl, self.sh_sat_slider, self.sh_sat_lbl, self.sh_light_slider, self.sh_light_lbl, self.sh_swatch_label = create_zone_tab("Shadows", 240)
+        sh_tab, self.sh_wheel, self.sh_hue_lbl, self.sh_sat_slider, self.sh_sat_lbl, self.sh_light_slider, self.sh_light_lbl, self.sh_swatch_label, self.sh_history_grid = create_zone_tab("Shadows", 240)
         self.tabs.addTab(sh_tab, "Shadows")
-        self.sh_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_hue_slider, 240))
+        self.sh_wheel.colorChanged.connect(self.on_sh_wheel_changed)
+        self.sh_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("shadows", h, s))
+        self.sh_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.sh_wheel, 240))
         self.sh_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_sat_slider, 0))
         self.sh_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_light_slider, 0))
         self.sh_swatch_label.clicked.connect(self.pick_shadow_color)
 
         # Midtones Tab (default green 120)
-        mid_tab, self.mid_hue_slider, self.mid_hue_lbl, self.mid_sat_slider, self.mid_sat_lbl, self.mid_light_slider, self.mid_light_lbl, self.mid_swatch_label = create_zone_tab("Midtones", 120)
+        mid_tab, self.mid_wheel, self.mid_hue_lbl, self.mid_sat_slider, self.mid_sat_lbl, self.mid_light_slider, self.mid_light_lbl, self.mid_swatch_label, self.mid_history_grid = create_zone_tab("Midtones", 120)
         self.tabs.addTab(mid_tab, "Midtones")
-        self.mid_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_hue_slider, 120))
+        self.mid_wheel.colorChanged.connect(self.on_mid_wheel_changed)
+        self.mid_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("midtones", h, s))
+        self.mid_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.mid_wheel, 120))
         self.mid_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_sat_slider, 0))
         self.mid_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_light_slider, 0))
         self.mid_swatch_label.clicked.connect(self.pick_midtone_color)
 
         # Highlights Tab (default yellow/gold 60)
-        hi_tab, self.hi_hue_slider, self.hi_hue_lbl, self.hi_sat_slider, self.hi_sat_lbl, self.hi_light_slider, self.hi_light_lbl, self.hi_swatch_label = create_zone_tab("Highlights", 60)
+        hi_tab, self.hi_wheel, self.hi_hue_lbl, self.hi_sat_slider, self.hi_sat_lbl, self.hi_light_slider, self.hi_light_lbl, self.hi_swatch_label, self.hi_history_grid = create_zone_tab("Highlights", 60)
         self.tabs.addTab(hi_tab, "Highlights")
-        self.hi_hue_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_hue_slider, 60))
+        self.hi_wheel.colorChanged.connect(self.on_hi_wheel_changed)
+        self.hi_wheel.interactionFinished.connect(lambda h, s: self.add_custom_color("highlights", h, s))
+        self.hi_hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.hi_wheel, 60))
         self.hi_sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_sat_slider, 0))
         self.hi_light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_light_slider, 0))
         self.hi_swatch_label.clicked.connect(self.pick_highlight_color)
+
+        # Populate custom color history grids from settings
+        self.update_history_swatches_ui("shadows", self.load_custom_colors("shadows"))
+        self.update_history_swatches_ui("midtones", self.load_custom_colors("midtones"))
+        self.update_history_swatches_ui("highlights", self.load_custom_colors("highlights"))
 
         # Master Global Controls Section
         master_widget = QWidget()
@@ -487,7 +662,7 @@ class MainWindow(QMainWindow):
 
     def on_manual_slider_changed(self) -> None:
         """
-        Reads values from all manual grading sliders, updates active center StateNode,
+        Reads values from all manual grading controls (wheels, sliders), updates active center StateNode,
         re-renders center image preview immediately, and updates swatches.
         Isolates manual changes exclusively to the center image to preserve snappiness.
         """
@@ -498,21 +673,26 @@ class MainWindow(QMainWindow):
         if state is None:
             return
 
-        # 1. Read values from sliders and update state node
-        state["shadow_hue"] = float(self.sh_hue_slider.value())
+        # 1. Read values and update state node
+        state["shadow_hue"] = float(self.sh_wheel.hue)
         state["shadow_sat"] = self.sh_sat_slider.value() / 100.0
         state["shadow_light"] = self.sh_light_slider.value() / 100.0
 
-        state["midtone_hue"] = float(self.mid_hue_slider.value())
+        state["midtone_hue"] = float(self.mid_wheel.hue)
         state["midtone_sat"] = self.mid_sat_slider.value() / 100.0
         state["midtone_light"] = self.mid_light_slider.value() / 100.0
 
-        state["highlight_hue"] = float(self.hi_hue_slider.value())
+        state["highlight_hue"] = float(self.hi_wheel.hue)
         state["highlight_sat"] = self.hi_sat_slider.value() / 100.0
         state["highlight_light"] = self.hi_light_slider.value() / 100.0
 
         state["blending"] = self.blending_slider.value() / 100.0
         state["balance"] = self.balance_slider.value() / 100.0
+
+        # Ensure wheels are synchronized with the sliders
+        self.sh_wheel.set_color(state["shadow_hue"], state["shadow_sat"])
+        self.mid_wheel.set_color(state["midtone_hue"], state["midtone_sat"])
+        self.hi_wheel.set_color(state["highlight_hue"], state["highlight_sat"])
 
         # Update text readouts
         self.sh_hue_lbl.setText(f"Hue: {state['shadow_hue']:.0f}°")
@@ -539,27 +719,52 @@ class MainWindow(QMainWindow):
             graded_center = apply_grading(self.proxy_image, state)
             self.containers[4].set_image(graded_center)
 
+    def on_sh_wheel_changed(self, hue: float, sat: float) -> None:
+        self.block_manual_signals(True)
+        self.sh_sat_slider.setValue(int(sat * 100.0))
+        self.block_manual_signals(False)
+        self.on_manual_slider_changed()
+
+    def on_mid_wheel_changed(self, hue: float, sat: float) -> None:
+        self.block_manual_signals(True)
+        self.mid_sat_slider.setValue(int(sat * 100.0))
+        self.block_manual_signals(False)
+        self.on_manual_slider_changed()
+
+    def on_hi_wheel_changed(self, hue: float, sat: float) -> None:
+        self.block_manual_signals(True)
+        self.hi_sat_slider.setValue(int(sat * 100.0))
+        self.block_manual_signals(False)
+        self.on_manual_slider_changed()
+
+    def reset_wheel_hue(self, wheel: ColorWheel, default_hue: float) -> None:
+        """
+        Helper method to reset a wheel back to default hue.
+        """
+        wheel.set_color(default_hue, wheel.sat)
+        self.on_manual_slider_changed()
+
     def pick_shadow_color(self) -> None:
         """
         Opens QColorDialog to select a shadow tint color, and updates the state.
         """
-        self.pick_zone_color("shadow_hue", "shadow_sat", self.sh_hue_slider, self.sh_sat_slider, 240.0)
+        self.pick_zone_color("shadow_hue", "shadow_sat", self.sh_wheel, self.sh_sat_slider, 240.0)
 
     def pick_midtone_color(self) -> None:
         """
         Opens QColorDialog to select a midtone tint color, and updates the state.
         """
-        self.pick_zone_color("midtone_hue", "midtone_sat", self.mid_hue_slider, self.mid_sat_slider, 120.0)
+        self.pick_zone_color("midtone_hue", "midtone_sat", self.mid_wheel, self.mid_sat_slider, 120.0)
 
     def pick_highlight_color(self) -> None:
         """
         Opens QColorDialog to select a highlight tint color, and updates the state.
         """
-        self.pick_zone_color("highlight_hue", "highlight_sat", self.hi_hue_slider, self.hi_sat_slider, 60.0)
+        self.pick_zone_color("highlight_hue", "highlight_sat", self.hi_wheel, self.hi_sat_slider, 60.0)
 
-    def pick_zone_color(self, hue_key: str, sat_key: str, hue_slider: QSlider, sat_slider: QSlider, default_hue: float) -> None:
+    def pick_zone_color(self, hue_key: str, sat_key: str, wheel: ColorWheel, sat_slider: QSlider, default_hue: float) -> None:
         """
-        Generic helper to open QColorDialog and apply HSL values to sliders.
+        Generic helper to open QColorDialog and apply HSL values to sliders and wheel.
         """
         state = self.history_manager.get_current_state()
         if state is None:
@@ -575,14 +780,93 @@ class MainWindow(QMainWindow):
             hue = h * 360.0 if h >= 0.0 else current_hue
             sat = s
             
-            # Sync sliders
+            # Sync wheel and slider
             self.block_manual_signals(True)
-            hue_slider.setValue(int(hue))
+            wheel.set_color(hue, sat)
             sat_slider.setValue(int(sat * 100.0))
             self.block_manual_signals(False)
             
             # Recalculate
             self.on_manual_slider_changed()
+
+            # Add to rolling history
+            zone_name = hue_key.split("_")[0] + "s"
+            self.add_custom_color(zone_name, hue, sat)
+
+    def load_custom_colors(self, zone: str) -> list:
+        settings = QSettings("NSS", "ColorGradingExplorer")
+        data = settings.value(f"history_grid_{zone}")
+        if data:
+            try:
+                return json.loads(str(data))
+            except Exception:
+                pass
+                
+        # Fallback to defaults
+        if zone == "shadows":
+            return [[240.0, 0.0], [240.0, 0.1], [240.0, 0.2], [240.0, 0.3], [200.0, 0.1], [200.0, 0.2], [270.0, 0.1], [270.0, 0.2]]
+        elif zone == "midtones":
+            return [[120.0, 0.0], [120.0, 0.1], [120.0, 0.2], [120.0, 0.3], [80.0, 0.1], [80.0, 0.2], [160.0, 0.1], [160.0, 0.2]]
+        else:
+            return [[60.0, 0.0], [60.0, 0.1], [60.0, 0.2], [60.0, 0.3], [30.0, 0.1], [30.0, 0.2], [90.0, 0.1], [90.0, 0.2]]
+
+    def add_custom_color(self, zone: str, hue: float, sat: float) -> None:
+        h = float(round(hue)) % 360
+        s = float(round(sat, 2))
+        
+        history = self.load_custom_colors(zone)
+                
+        new_history = []
+        for item in history:
+            if abs(item[0] - h) < 1.0 and abs(item[1] - s) < 0.01:
+                continue
+            new_history.append(item)
+            
+        new_history.insert(0, [h, s])
+        new_history = new_history[:8]
+        
+        settings = QSettings("NSS", "ColorGradingExplorer")
+        settings.setValue(f"history_grid_{zone}", json.dumps(new_history))
+        self.update_history_swatches_ui(zone, new_history)
+
+    def update_history_swatches_ui(self, zone: str, history: list) -> None:
+        if zone == "shadows":
+            grid = self.sh_history_grid
+        elif zone == "midtones":
+            grid = self.mid_history_grid
+        else:
+            grid = self.hi_history_grid
+
+        while grid.count():
+            item = grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        for i, (h, s) in enumerate(history):
+            row = i // 4
+            col = i % 4
+            swatch = ColorSwatch(h, s, self)
+            swatch.clicked.connect(lambda hue, sat, z=zone: self.on_swatch_clicked(z, hue, sat))
+            grid.addWidget(swatch, row, col)
+
+    def on_swatch_clicked(self, zone: str, hue: float, sat: float) -> None:
+        if zone == "shadows":
+            wheel = self.sh_wheel
+            sat_slider = self.sh_sat_slider
+        elif zone == "midtones":
+            wheel = self.mid_wheel
+            sat_slider = self.mid_sat_slider
+        else:
+            wheel = self.hi_wheel
+            sat_slider = self.hi_sat_slider
+
+        self.block_manual_signals(True)
+        wheel.set_color(hue, sat)
+        sat_slider.setValue(int(sat * 100.0))
+        self.block_manual_signals(False)
+
+        self.on_manual_slider_changed()
 
     def update_zone_swatches(self, state: StateNode) -> None:
         """
@@ -618,20 +902,20 @@ class MainWindow(QMainWindow):
 
     def sync_sliders_with_state(self, state: StateNode) -> None:
         """
-        Synchronizes all UI sliders and swatches to match the active StateNode parameters.
+        Synchronizes all UI sliders, wheels, and swatches to match the active StateNode parameters.
         Blocks signals to avoid triggering recursive render events during synchronization.
         """
         self.block_manual_signals(True)
 
-        self.sh_hue_slider.setValue(int(state.get("shadow_hue", 240.0)))
+        self.sh_wheel.set_color(state.get("shadow_hue", 240.0), state.get("shadow_sat", 0.0))
         self.sh_sat_slider.setValue(int(state.get("shadow_sat", 0.0) * 100.0))
         self.sh_light_slider.setValue(int(state.get("shadow_light", 0.0) * 100.0))
 
-        self.mid_hue_slider.setValue(int(state.get("midtone_hue", 120.0)))
+        self.mid_wheel.set_color(state.get("midtone_hue", 120.0), state.get("midtone_sat", 0.0))
         self.mid_sat_slider.setValue(int(state.get("midtone_sat", 0.0) * 100.0))
         self.mid_light_slider.setValue(int(state.get("midtone_light", 0.0) * 100.0))
 
-        self.hi_hue_slider.setValue(int(state.get("highlight_hue", 60.0)))
+        self.hi_wheel.set_color(state.get("highlight_hue", 60.0), state.get("highlight_sat", 0.0))
         self.hi_sat_slider.setValue(int(state.get("highlight_sat", 0.0) * 100.0))
         self.hi_light_slider.setValue(int(state.get("highlight_light", 0.0) * 100.0))
 
@@ -662,15 +946,15 @@ class MainWindow(QMainWindow):
         """
         Helper to block/unblock signals on all manual controls.
         """
-        self.sh_hue_slider.blockSignals(block)
+        self.sh_wheel.blockSignals(block)
         self.sh_sat_slider.blockSignals(block)
         self.sh_light_slider.blockSignals(block)
 
-        self.mid_hue_slider.blockSignals(block)
+        self.mid_wheel.blockSignals(block)
         self.mid_sat_slider.blockSignals(block)
         self.mid_light_slider.blockSignals(block)
 
-        self.hi_hue_slider.blockSignals(block)
+        self.hi_wheel.blockSignals(block)
         self.hi_sat_slider.blockSignals(block)
         self.hi_light_slider.blockSignals(block)
 

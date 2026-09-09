@@ -3,6 +3,25 @@ import pytest
 from unittest.mock import patch
 from nss.mru import MruManager
 
+class MockQSettings:
+    def __init__(self, organization: str, application: str) -> None:
+        self._store = {}
+        # Prepopulate with defaults for testing
+        dir1 = os.path.abspath("dummy/existing/dir1")
+        dir2 = os.path.abspath("dummy/existing/dir2")
+        self._store["mru_directories"] = [dir1, dir2]
+
+    def value(self, key: str, default: any = None) -> any:
+        return self._store.get(key, default)
+
+    def setValue(self, key: str, value: any) -> None:
+        self._store[key] = value
+
+@pytest.fixture(autouse=True)
+def mock_qsettings():
+    with patch('nss.mru.QSettings', MockQSettings):
+        yield
+
 def mock_isdir(path: str) -> bool:
     # Treat paths ending with file extensions as files (not directories)
     if path.lower().endswith(('.tif', '.tiff', '.txt', '.png', '.jpg')):

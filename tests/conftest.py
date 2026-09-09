@@ -1,6 +1,10 @@
+import os
 import sys
 from unittest.mock import MagicMock
 import numpy as np
+
+# Headless pyqt6 testing.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 # --- Mock tifffile ---
 class MockTiffPage:
@@ -59,32 +63,3 @@ sys.modules['scipy.special'] = MagicMock()
 scipy_signal_mock = MagicMock()
 scipy_signal_mock.convolve2d = MagicMock()
 sys.modules['scipy.signal'] = scipy_signal_mock
-
-# --- Mock PyQt6 ---
-pyqt6_mock = MagicMock()
-sys.modules['PyQt6'] = pyqt6_mock
-sys.modules['PyQt6.QtCore'] = pyqt6_mock
-
-class MockQSettings:
-    """
-    In-memory mock for QSettings to support MRU persistence testing.
-    """
-    def __init__(self, org: str, app: str) -> None:
-        self.org = org
-        self.app = app
-        # Initial dummy data to match test expectations, using platform-normalized absolute paths
-        import os
-        self._store = {
-            "mru_directories": [
-                os.path.abspath("dummy/existing/dir1"),
-                os.path.abspath("dummy/existing/dir2")
-            ]
-        }
-
-    def value(self, key: str, default=None):
-        return self._store.get(key, default)
-
-    def setValue(self, key: str, value) -> None:
-        self._store[key] = value
-
-pyqt6_mock.QSettings = MockQSettings
