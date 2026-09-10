@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libegl1 \
     libxkbcommon0 \
     libdbus-1-3 \
+    libfontconfig1 \
     xvfb \
     libglib2.0-0t64 \
     && rm -rf /var/lib/apt/lists/*
@@ -20,6 +21,7 @@ RUN apt-get update && apt-get install -y curl git \
 RUN npm install -g @google/gemini-cli
 
 # Install core test dependencies (using headless OpenCV!)
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir pytest numpy opencv-python-headless
 
 WORKDIR /workspace

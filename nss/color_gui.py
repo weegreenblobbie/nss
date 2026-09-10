@@ -16,6 +16,10 @@ from PyQt6.QtWidgets import (
     QSlider,
     QTabWidget,
     QColorDialog,
+    QMenu,
+    QDialog,
+    QLineEdit,
+    QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSettings, QPointF, QMimeData
 from PyQt6.QtGui import (
@@ -29,6 +33,7 @@ from PyQt6.QtGui import (
     QRadialGradient,
     QPen,
     QDrag,
+    QIntValidator,
 )
 
 from nss.utils import TiffFile
@@ -202,8 +207,8 @@ class ColorWheel(QWidget):
         super().__init__(parent)
         self.hue: float = 0.0  # Range: [0.0, 360.0]
         self.sat: float = 0.0  # Range: [0.0, 1.0]
-        self.setMinimumSize(120, 120)
-        self.setMaximumSize(180, 180)
+        self.setMinimumSize(160, 160)
+        self.setMaximumSize(240, 240)
         self.setCursor(Qt.CursorShape.CrossCursor)
 
     def set_color(self, hue: float, sat: float) -> None:
@@ -299,6 +304,236 @@ class ColorWheel(QWidget):
             self.interactionFinished.emit(self.hue, self.sat)
 
 
+class ColorModifyDialog(QDialog):
+    """
+    A dialog for editing a color with real-time bi-directional sync
+    between RGB, HSL, HSV, and Hex representation fields (0-255 values).
+    """
+    def __init__(self, color: QColor, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit Saved Color")
+        self.setStyleSheet("background-color: #2b2b2b; color: #eee;")
+        self.current_color = QColor(color)
+        self.updating = False
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        # Preview row
+        preview_layout = QHBoxLayout()
+        preview_label = QLabel("Preview:")
+        preview_label.setStyleSheet("font-weight: bold;")
+        self.preview_swatch = QLabel()
+        self.preview_swatch.setFixedSize(80, 24)
+        preview_layout.addWidget(preview_label)
+        preview_layout.addWidget(self.preview_swatch)
+        preview_layout.addStretch()
+        layout.addLayout(preview_layout)
+        
+        # Fields grid
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        
+        # Headers
+        rgb_hdr = QLabel("RGB (0-255)")
+        rgb_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        hsl_hdr = QLabel("HSL (0-255)")
+        hsl_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        hsv_hdr = QLabel("HSV (0-255)")
+        hsv_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        
+        grid.addWidget(rgb_hdr, 0, 0, 1, 2)
+        grid.addWidget(hsl_hdr, 0, 2, 1, 2)
+        grid.addWidget(hsv_hdr, 0, 4, 1, 2)
+        
+        # R / H / H
+        grid.addWidget(QLabel("R:"), 1, 0)
+        self.r_edit = QLineEdit()
+        self.r_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.r_edit, 1, 1)
+        
+        grid.addWidget(QLabel("H:"), 1, 2)
+        self.hsl_h_edit = QLineEdit()
+        self.hsl_h_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsl_h_edit, 1, 3)
+        
+        grid.addWidget(QLabel("H:"), 1, 4)
+        self.hsv_h_edit = QLineEdit()
+        self.hsv_h_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsv_h_edit, 1, 5)
+        
+        # G / S / S
+        grid.addWidget(QLabel("G:"), 2, 0)
+        self.g_edit = QLineEdit()
+        self.g_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.g_edit, 2, 1)
+        
+        grid.addWidget(QLabel("S:"), 2, 2)
+        self.hsl_s_edit = QLineEdit()
+        self.hsl_s_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsl_s_edit, 2, 3)
+        
+        grid.addWidget(QLabel("S:"), 2, 4)
+        self.hsv_s_edit = QLineEdit()
+        self.hsv_s_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsv_s_edit, 2, 5)
+        
+        # B / L / V
+        grid.addWidget(QLabel("B:"), 3, 0)
+        self.b_edit = QLineEdit()
+        self.b_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.b_edit, 3, 1)
+        
+        grid.addWidget(QLabel("L:"), 3, 2)
+        self.hsl_l_edit = QLineEdit()
+        self.hsl_l_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsl_l_edit, 3, 3)
+        
+        grid.addWidget(QLabel("V:"), 3, 4)
+        self.hsv_v_edit = QLineEdit()
+        self.hsv_v_edit.setValidator(QIntValidator(0, 255))
+        grid.addWidget(self.hsv_v_edit, 3, 5)
+        
+        # Hex field spanning at the bottom
+        grid.addWidget(QLabel("Hex:"), 4, 0)
+        self.hex_edit = QLineEdit()
+        grid.addWidget(self.hex_edit, 4, 1, 1, 2)
+        
+        layout.addLayout(grid)
+        
+        # Set text box styles for a polished look
+        for edit in [self.r_edit, self.g_edit, self.b_edit, 
+                     self.hsl_h_edit, self.hsl_s_edit, self.hsl_l_edit,
+                     self.hsv_h_edit, self.hsv_s_edit, self.hsv_v_edit, self.hex_edit]:
+            edit.setStyleSheet("background-color: #3a3a3a; color: #fff; border: 1px solid #555; border-radius: 2px; padding: 2px;")
+            edit.setFixedWidth(50)
+        self.hex_edit.setFixedWidth(80) # Hex needs a bit more space
+        
+        # Dialog buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            Qt.Orientation.Horizontal,
+            self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        # Connect text signals
+        self.r_edit.textChanged.connect(self.on_rgb_edited)
+        self.g_edit.textChanged.connect(self.on_rgb_edited)
+        self.b_edit.textChanged.connect(self.on_rgb_edited)
+        
+        self.hsl_h_edit.textChanged.connect(self.on_hsl_edited)
+        self.hsl_s_edit.textChanged.connect(self.on_hsl_edited)
+        self.hsl_l_edit.textChanged.connect(self.on_hsl_edited)
+        
+        self.hsv_h_edit.textChanged.connect(self.on_hsv_edited)
+        self.hsv_s_edit.textChanged.connect(self.on_hsv_edited)
+        self.hsv_v_edit.textChanged.connect(self.on_hsv_edited)
+        
+        self.hex_edit.textChanged.connect(self.on_hex_edited)
+        
+        # Initialize values
+        self.update_all_except(None)
+
+    def update_all_except(self, exclude: Optional[str]) -> None:
+        self.updating = True
+        color = self.current_color
+        
+        # Update RGB
+        if exclude != "rgb":
+            self.r_edit.setText(str(color.red()))
+            self.g_edit.setText(str(color.green()))
+            self.b_edit.setText(str(color.blue()))
+            
+        # Update HSL
+        if exclude != "hsl":
+            h_deg = max(0, color.hslHue())
+            h_255 = int(h_deg * 255.0 / 360.0)
+            self.hsl_h_edit.setText(str(h_255))
+            self.hsl_s_edit.setText(str(color.hslSaturation()))
+            self.hsl_l_edit.setText(str(color.lightness()))
+            
+        # Update HSV
+        if exclude != "hsv":
+            h_deg = max(0, color.hsvHue())
+            h_255 = int(h_deg * 255.0 / 360.0)
+            self.hsv_h_edit.setText(str(h_255))
+            self.hsv_s_edit.setText(str(color.hsvSaturation()))
+            self.hsv_v_edit.setText(str(color.value()))
+            
+        # Update Hex
+        if exclude != "hex":
+            self.hex_edit.setText(color.name().upper())
+            
+        # Update preview color
+        self.preview_swatch.setStyleSheet(
+            f"border: 1px solid #555; border-radius: 4px; background-color: {color.name()};"
+        )
+        self.updating = False
+
+    def on_rgb_edited(self) -> None:
+        if self.updating:
+            return
+        try:
+            r = int(self.r_edit.text() or 0)
+            g = int(self.g_edit.text() or 0)
+            b = int(self.b_edit.text() or 0)
+            r = min(255, max(0, r))
+            g = min(255, max(0, g))
+            b = min(255, max(0, b))
+            
+            self.current_color.setRgb(r, g, b)
+            self.update_all_except("rgb")
+        except ValueError:
+            pass
+
+    def on_hsl_edited(self) -> None:
+        if self.updating:
+            return
+        try:
+            h = int(self.hsl_h_edit.text() or 0)
+            s = int(self.hsl_s_edit.text() or 0)
+            l = int(self.hsl_l_edit.text() or 0)
+            h = min(255, max(0, h))
+            s = min(255, max(0, s))
+            l = min(255, max(0, l))
+            
+            h_deg = int(h * 360.0 / 255.0) % 360
+            self.current_color.setHsl(h_deg, s, l)
+            self.update_all_except("hsl")
+        except ValueError:
+            pass
+
+    def on_hsv_edited(self) -> None:
+        if self.updating:
+            return
+        try:
+            h = int(self.hsv_h_edit.text() or 0)
+            s = int(self.hsv_s_edit.text() or 0)
+            v = int(self.hsv_v_edit.text() or 0)
+            h = min(255, max(0, h))
+            s = min(255, max(0, s))
+            v = min(255, max(0, v))
+            
+            h_deg = int(h * 360.0 / 255.0) % 360
+            self.current_color.setHsv(h_deg, s, v)
+            self.update_all_except("hsv")
+        except ValueError:
+            pass
+
+    def on_hex_edited(self) -> None:
+        if self.updating:
+            return
+        text = self.hex_edit.text().strip()
+        if not text.startswith("#"):
+            text = "#" + text
+        if QColor.isValidColor(text):
+            self.current_color.setNamedColor(text)
+            self.update_all_except("hex")
+
+
 class ColorSwatch(QLabel):
     """
     A custom color swatch that displays an HSL color, emits a clicked signal,
@@ -306,30 +541,82 @@ class ColorSwatch(QLabel):
     """
     clicked = pyqtSignal(float, float)  # Emits (hue, saturation)
     overwritten = pyqtSignal(int, float, float)  # Emits (index, hue, saturation)
+    forgotten = pyqtSignal(int)  # Emits (index)
+    edited = pyqtSignal(int, float, float)  # Emits (index, hue, saturation)
 
-    def __init__(self, hue: float = 0.0, sat: float = 0.0, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, hue: Optional[float] = 0.0, sat: Optional[float] = 0.0, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.hue: float = hue
-        self.sat: float = sat
+        self.hue: Optional[float] = hue
+        self.sat: Optional[float] = sat
         self.index: int = 0
         self.setFixedSize(24, 24)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAcceptDrops(True)
         self.update_color(hue, sat)
 
-    def update_color(self, hue: float, sat: float) -> None:
-        self.hue = float(hue)
-        self.sat = float(sat)
-        color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
-        self.setStyleSheet(
-            f"border: 1px solid #555; border-radius: 4px; "
-            f"background-color: {color.name()};"
-        )
-        self.setToolTip(f"Hue: {self.hue:.0f}°, Sat: {self.sat:.2f}")
+    def update_color(self, hue: Optional[float], sat: Optional[float]) -> None:
+        if hue is None or sat is None:
+            self.hue = None
+            self.sat = None
+            self.setStyleSheet(
+                "border: 1px dashed #555; border-radius: 4px; "
+                "background-color: #1a1a1a;"
+            )
+            self.setToolTip("Empty Slot. Drag a color here to save.")
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.hue = float(hue)
+            self.sat = float(sat)
+            color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
+            self.setStyleSheet(
+                f"border: 1px solid #555; border-radius: 4px; "
+                f"background-color: {color.name()};"
+            )
+            self.setToolTip(f"Hue: {self.hue:.0f}°, Sat: {self.sat:.2f}")
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.hue, self.sat)
+            if self.hue is not None and self.sat is not None:
+                self.clicked.emit(self.hue, self.sat)
+
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background-color: #2b2b2b; color: #eee; border: 1px solid #555; }"
+            "QMenu::item:selected { background-color: #444; }"
+        )
+        
+        edit_action = QAction("Edit", self)
+        forget_action = QAction("Forget", self)
+        
+        if self.hue is None or self.sat is None:
+            edit_action.setEnabled(False)
+            forget_action.setEnabled(False)
+            
+        menu.addAction(edit_action)
+        menu.addAction(forget_action)
+        
+        edit_action.triggered.connect(self._on_edit_triggered)
+        forget_action.triggered.connect(self._on_forget_triggered)
+        
+        menu.exec(event.globalPos())
+
+    def _on_edit_triggered(self) -> None:
+        if self.hue is None or self.sat is None:
+            return
+            
+        color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
+        dialog = ColorModifyDialog(color, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_color = dialog.current_color
+            h_deg = max(0, new_color.hslHue())
+            s_val = new_color.hslSaturationF()
+            
+            self.update_color(float(h_deg), float(s_val))
+            self.edited.emit(self.index, float(h_deg), float(s_val))
+
+    def _on_forget_triggered(self) -> None:
+        self.forgotten.emit(self.index)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText():
@@ -555,19 +842,11 @@ class MainWindow(QMainWindow):
             tab_layout.setContentsMargins(10, 10, 10, 10)
             tab_layout.setSpacing(5)
 
-            # Top Header Row with Swatch Label
-            top_row = QHBoxLayout()
-            title_lbl = QLabel(f"{title_prefix} Color parameters")
-            title_lbl.setStyleSheet("font-weight: bold; color: #ddd; font-size: 11px;")
             swatch_lbl = ClickableSwatchLabel()
-            swatch_lbl.setFixedSize(36, 14)
-            swatch_lbl.setStyleSheet("border: 1px solid #555; border-radius: 2px;")
+            swatch_lbl.setFixedSize(24, 24)
+            swatch_lbl.setStyleSheet("border: 1px solid #555; border-radius: 4px;")
             swatch_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
             swatch_lbl.setToolTip("Click to open color picker wheel")
-            top_row.addWidget(title_lbl)
-            top_row.addStretch()
-            top_row.addWidget(swatch_lbl)
-            tab_layout.addLayout(top_row)
 
             # 1. Color Wheel
             wheel = ColorWheel()
@@ -606,10 +885,24 @@ class MainWindow(QMainWindow):
             tab_layout.addWidget(lum_lbl)
             tab_layout.addWidget(lum_sld)
 
-            # 5. Recent Colors Grid
-            recent_lbl = QLabel("Recent Custom Colors:")
+            # 5. Saved Colors Grid
+            recent_lbl = QLabel("Saved Custom Colors:")
             recent_lbl.setStyleSheet("color: #aaa; font-size: 10px; font-weight: bold; margin-top: 5px;")
             tab_layout.addWidget(recent_lbl)
+
+            # Position active color patch (swatch_lbl) and a "Drag to save" label directly above the grid widget
+            patch_layout = QHBoxLayout()
+            patch_layout.setContentsMargins(0, 0, 0, 0)
+            patch_layout.setSpacing(6)
+            
+            drag_lbl = QLabel("Drag to save")
+            drag_lbl.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+            
+            patch_layout.addWidget(swatch_lbl)
+            patch_layout.addWidget(drag_lbl)
+            patch_layout.addStretch()
+            
+            tab_layout.addLayout(patch_layout)
 
             grid_widget = QWidget()
             grid_layout = QGridLayout(grid_widget)
@@ -876,6 +1169,8 @@ class MainWindow(QMainWindow):
                 
         new_history = []
         for item in history:
+            if item is None or not isinstance(item, list) or len(item) < 2:
+                continue
             if abs(item[0] - h) < 1.0 and abs(item[1] - s) < 0.01:
                 continue
             new_history.append(item)
@@ -901,13 +1196,20 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-        for i, (h, s) in enumerate(history):
+        for i, item in enumerate(history):
             row = i // 8
             col = i % 8
+            if item is None or not isinstance(item, list) or len(item) < 2:
+                h, s = None, None
+            else:
+                h, s = item[0], item[1]
+                
             swatch = ColorSwatch(h, s, self)
             swatch.index = i
             swatch.clicked.connect(lambda hue, sat, z=zone: self.on_swatch_clicked(z, hue, sat))
             swatch.overwritten.connect(lambda idx, hue, sat, z=zone: self.on_swatch_overwritten(z, idx, hue, sat))
+            swatch.edited.connect(lambda idx, hue, sat, z=zone: self.on_swatch_overwritten(z, idx, hue, sat))
+            swatch.forgotten.connect(lambda idx, z=zone: self.on_swatch_forgotten(z, idx))
             grid.addWidget(swatch, row, col)
 
     def on_swatch_clicked(self, zone: str, hue: float, sat: float) -> None:
@@ -935,6 +1237,14 @@ class MainWindow(QMainWindow):
             settings = QSettings("NSS", "ColorGradingExplorer")
             settings.setValue(f"history_grid_{zone}", json.dumps(history))
 
+    def on_swatch_forgotten(self, zone: str, index: int) -> None:
+        history = self.load_custom_colors(zone)
+        if index < len(history):
+            history[index] = None
+            settings = QSettings("NSS", "ColorGradingExplorer")
+            settings.setValue(f"history_grid_{zone}", json.dumps(history))
+            self.update_history_swatches_ui(zone, history)
+
     def update_zone_swatches(self, state: StateNode) -> None:
         """
         Updates the three tab color swatches live based on HSL and updates draggable state.
@@ -947,7 +1257,7 @@ class MainWindow(QMainWindow):
         sh_hue = state.get("shadow_hue", 240.0)
         sh_sat = 0.15 if is_comp else state.get("shadow_sat", 0.0)
         sh_color = QColor.fromHslF(sh_hue / 360.0, sh_sat, 1.0 - 0.5 * sh_sat)
-        sh_pix = QPixmap(36, 14)
+        sh_pix = QPixmap(24, 24)
         sh_pix.fill(sh_color)
         self.sh_swatch_label.setPixmap(sh_pix)
         self.sh_swatch_label.hue = sh_hue
@@ -957,7 +1267,7 @@ class MainWindow(QMainWindow):
         mid_hue = state.get("midtone_hue", 120.0)
         mid_sat = state.get("midtone_sat", 0.0)
         mid_color = QColor.fromHslF(mid_hue / 360.0, mid_sat, 1.0 - 0.5 * mid_sat)
-        mid_pix = QPixmap(36, 14)
+        mid_pix = QPixmap(24, 24)
         mid_pix.fill(mid_color)
         self.mid_swatch_label.setPixmap(mid_pix)
         self.mid_swatch_label.hue = mid_hue
@@ -967,7 +1277,7 @@ class MainWindow(QMainWindow):
         hi_hue = state.get("highlight_hue", 60.0)
         hi_sat = 0.15 if is_comp else state.get("highlight_sat", 0.0)
         hi_color = QColor.fromHslF(hi_hue / 360.0, hi_sat, 1.0 - 0.5 * hi_sat)
-        hi_pix = QPixmap(36, 14)
+        hi_pix = QPixmap(24, 24)
         hi_pix.fill(hi_color)
         self.hi_swatch_label.setPixmap(hi_pix)
         self.hi_swatch_label.hue = hi_hue

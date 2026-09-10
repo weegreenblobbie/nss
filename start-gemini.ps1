@@ -25,11 +25,11 @@ Write-Host "Starting Gemini Agent container..." -ForegroundColor Cyan
 # -it keeps it interactive
 # --rm removes the container when you exit
 # -v mounts your current Windows folder to /workspace
-# -e forwards the API key
+# -e forwards the API key and terminal color flags to eliminate the 256-color warning
 # The final 'gemini' command tells the container to launch the CLI directly
 docker run -it --rm `
     -v "${PWD}:/workspace" `
     -e GEMINI_API_KEY=$apiKey `
+    -e TERM=xterm-256color `
+    -e COLORTERM=truecolor `
     gemini-agent gemini
-    
-    
