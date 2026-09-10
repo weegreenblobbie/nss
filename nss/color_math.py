@@ -369,3 +369,96 @@ def generate_mutations(
         return generate_complementary_mutations(center, axis, step_size)
     else:
         raise ValueError(f"Unknown harmony mode: {mode}")
+
+def generate_random_harmony_state(mode: str) -> StateNode:
+    """
+    Generates a brand new random StateNode based on Harmony Mode (Complementary, Analogous, Triadic, Monochromatic)
+    following Step 4 formulas.
+    """
+    import random
+    def j(variance: float) -> float:
+        return random.uniform(-variance, variance)
+        
+    H = random.uniform(0.0, 360.0)
+    
+    # Step A: Generate Zone-Constrained Saturation & Luminance
+    sh_sat = random.uniform(0.20, 0.70)
+    sh_light = random.uniform(0.10, 0.40)
+    
+    mid_sat = random.uniform(0.30, 0.85)
+    mid_light = random.uniform(0.40, 0.70)
+    
+    hi_sat = random.uniform(0.10, 0.50)
+    hi_light = random.uniform(0.70, 0.95)
+    
+    # Step B: Map Hues to Zones based on Harmony Mode
+    if mode == "Complementary":
+        sh_hue = (H + 180.0 + j(15.0)) % 360.0
+        mid_hue = H
+        hi_hue = (H + j(10.0)) % 360.0
+    elif mode == "Analogous":
+        sh_hue = (H - 30.0 + j(10.0)) % 360.0
+        mid_hue = H
+        hi_hue = (H + 30.0 + j(10.0)) % 360.0
+    elif mode == "Triadic":
+        sh_hue = H
+        mid_hue = (H + 120.0 + j(15.0)) % 360.0
+        hi_hue = (H + 240.0 + j(15.0)) % 360.0
+    else:  # Monochromatic
+        sh_hue = H
+        mid_hue = (H + j(5.0)) % 360.0
+        hi_hue = (H + j(5.0)) % 360.0
+        
+    state = create_default_state()
+    state["harmony_mode"] = mode  # type: ignore
+    state["shadow_hue"] = float(sh_hue)
+    state["shadow_sat"] = float(sh_sat)
+    state["shadow_light"] = float(sh_light)
+    state["midtone_hue"] = float(mid_hue)
+    state["midtone_sat"] = float(mid_sat)
+    state["midtone_light"] = float(mid_light)
+    state["highlight_hue"] = float(hi_hue)
+    state["highlight_sat"] = float(hi_sat)
+    state["highlight_light"] = float(hi_light)
+    return state
+
+def generate_explore_mutations(center: StateNode, mode: str, variation_strength: float) -> List[StateNode]:
+    """
+    Generates 9 mutations where the center is index 4.
+    The other 8 outer slots apply a random mutation scaled by variation_strength (Step 5).
+    """
+    import random
+    states: List[StateNode] = []
+    
+    def j(variance: float) -> float:
+        return random.uniform(-variance, variance)
+        
+    hue_var = 15.0 * variation_strength
+    sat_light_var = 0.20 * variation_strength
+    
+    for i in range(9):
+        if i == 4:
+            states.append(center.copy())
+        else:
+            mutated = center.copy()
+            mutated["harmony_mode"] = mode  # type: ignore
+            
+            # Mutate each zone (Shadows, Midtones, Highlights)
+            # Shadows
+            mutated["shadow_hue"] = float((center["shadow_hue"] + j(hue_var)) % 360.0)
+            mutated["shadow_sat"] = float(np.clip(center["shadow_sat"] + j(sat_light_var), 0.0, 1.0))
+            mutated["shadow_light"] = float(np.clip(center["shadow_light"] + j(sat_light_var), -1.0, 1.0))
+            
+            # Midtones
+            mutated["midtone_hue"] = float((center["midtone_hue"] + j(hue_var)) % 360.0)
+            mutated["midtone_sat"] = float(np.clip(center["midtone_sat"] + j(sat_light_var), 0.0, 1.0))
+            mutated["midtone_light"] = float(np.clip(center["midtone_light"] + j(sat_light_var), -1.0, 1.0))
+            
+            # Highlights
+            mutated["highlight_hue"] = float((center["highlight_hue"] + j(hue_var)) % 360.0)
+            mutated["highlight_sat"] = float(np.clip(center["highlight_sat"] + j(sat_light_var), 0.0, 1.0))
+            mutated["highlight_light"] = float(np.clip(center["highlight_light"] + j(sat_light_var), -1.0, 1.0))
+            
+            states.append(mutated)
+            
+    return states
