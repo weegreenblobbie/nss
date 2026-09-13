@@ -394,14 +394,14 @@ def generate_random_harmony_state(mode: str) -> StateNode:
         
     H = random.uniform(0.0, 360.0)
     
-    # Step A: Generate Zone-Constrained Saturation & Luminance (Luminance neutral, Saturation clamped to [0.0, 0.10])
-    sh_sat = random.uniform(0.0, 0.10)
+    # Step A: Generate Zone-Constrained Saturation & Luminance (Luminance neutral, Saturation clamped to [0.0, 0.50])
+    sh_sat = random.uniform(0.0, 0.50)
     sh_light = 0.0
     
-    mid_sat = random.uniform(0.0, 0.10)
+    mid_sat = random.uniform(0.0, 0.50)
     mid_light = 0.0
     
-    hi_sat = random.uniform(0.0, 0.10)
+    hi_sat = random.uniform(0.0, 0.50)
     hi_light = 0.0
     
     # Step B: Map Hues to Zones based on Harmony Mode
@@ -459,17 +459,17 @@ def generate_explore_mutations(center: StateNode, mode: str, variation_strength:
             # Mutate each zone (Shadows, Midtones, Highlights)
             # Shadows
             mutated["shadow_hue"] = float((center["shadow_hue"] + j(hue_var)) % 360.0)
-            mutated["shadow_sat"] = float(np.clip(center["shadow_sat"] + j(sat_light_var), 0.0, 0.10))
+            mutated["shadow_sat"] = float(np.clip(center["shadow_sat"] + j(sat_light_var), 0.0, 0.50))
             mutated["shadow_light"] = float(center["shadow_light"])
             
             # Midtones
             mutated["midtone_hue"] = float((center["midtone_hue"] + j(hue_var)) % 360.0)
-            mutated["midtone_sat"] = float(np.clip(center["midtone_sat"] + j(sat_light_var), 0.0, 0.10))
+            mutated["midtone_sat"] = float(np.clip(center["midtone_sat"] + j(sat_light_var), 0.0, 0.50))
             mutated["midtone_light"] = float(center["midtone_light"])
             
             # Highlights
             mutated["highlight_hue"] = float((center["highlight_hue"] + j(hue_var)) % 360.0)
-            mutated["highlight_sat"] = float(np.clip(center["highlight_sat"] + j(sat_light_var), 0.0, 0.10))
+            mutated["highlight_sat"] = float(np.clip(center["highlight_sat"] + j(sat_light_var), 0.0, 0.50))
             mutated["highlight_light"] = float(center["highlight_light"])
             
             states.append(mutated)
