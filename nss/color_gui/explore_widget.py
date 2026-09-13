@@ -34,8 +34,7 @@ class ImageContainer(QLabel):
         self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Sunken)
         self.setLineWidth(2)
         self.setStyleSheet(
-            "background-color: #2e2e2e; color: #d0d0d0; "
-            "border: 1px solid #555555; border-radius: 4px;"
+            "border: 1px solid #cccccc; border-radius: 4px;"
         )
         self.setText(f"Image {index}")
 
@@ -49,10 +48,6 @@ class ImageContainer(QLabel):
             return
             
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background-color: #2b2b2b; color: #eee; border: 1px solid #555; }"
-            "QMenu::item:selected { background-color: #444; }"
-        )
         edit_action = QAction("Edit", self)
         edit_action.triggered.connect(lambda: self.edit_requested.emit(self.index))
         menu.addAction(edit_action)
@@ -64,14 +59,12 @@ class ImageContainer(QLabel):
         """
         if is_active:
             self.setStyleSheet(
-                "background-color: #1a3a1a; color: #40ff40; "
-                "border: 3px solid #00ff00; border-radius: 4px;"
+                "border: 3px solid #008000; border-radius: 4px;"
             )
             self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
         else:
             self.setStyleSheet(
-                "background-color: #2e2e2e; color: #d0d0d0; "
-                "border: 1px solid #555555; border-radius: 4px;"
+                "border: 1px solid #cccccc; border-radius: 4px;"
             )
             self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Sunken)
 

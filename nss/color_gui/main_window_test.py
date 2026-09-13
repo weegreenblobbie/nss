@@ -59,3 +59,22 @@ def test_main_window_memento_flow() -> None:
     # Mid zone values should have reverted to original state (defaults: 0.0, 0.0)
     assert window.mid_zone.sat_slider.value() == 0
     assert window.mid_zone.light_slider.value() == 0
+
+
+def test_manual_slider_changed_no_crash() -> None:
+    import numpy as np
+    app = QApplication.instance() or QApplication([])
+    
+    window = MainWindow()
+    # Set dummy images so on_manual_slider_changed doesn't return early
+    dummy_img = np.zeros((10, 10, 3), dtype=np.float32)
+    window.master_image = dummy_img
+    window.proxy_image = dummy_img
+    
+    # Simulate trigger of manual slider change
+    window.on_manual_slider_changed()
+    
+    # Ensure swatch_lbl received the values and set values on it correctly
+    assert window.sh_zone.swatch_lbl.hue == 0.0
+    assert window.sh_zone.swatch_lbl.sat == 0.0
+

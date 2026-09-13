@@ -117,3 +117,48 @@ def test_mutation_axes() -> None:
         assert s["sat_shift"] == center["sat_shift"]
         assert s["hue_shift"] == center["hue_shift"]
 
+
+def test_explore_mode_constraints() -> None:
+    from nss.color_math import generate_random_harmony_state, generate_explore_mutations
+    
+    # 1. Test generate_random_harmony_state
+    for mode in ["Complementary", "Analogous", "Triadic", "Monochromatic"]:
+        state = generate_random_harmony_state(mode)
+        # All zone lightness values should be 0.0 (the neutral baseline value)
+        assert state["shadow_light"] == 0.0
+        assert state["midtone_light"] == 0.0
+        assert state["highlight_light"] == 0.0
+        # Saturation must be constrained to [0.0, 0.20]
+        assert 0.0 <= state["shadow_sat"] <= 0.20
+        assert 0.0 <= state["midtone_sat"] <= 0.20
+        assert 0.0 <= state["highlight_sat"] <= 0.20
+
+    # 2. Test generate_explore_mutations
+    center = create_default_state("Monochromatic")
+    # Set non-zero light values to ensure they are passed through
+    center["shadow_light"] = -0.3
+    center["midtone_light"] = 0.5
+    center["highlight_light"] = 0.8
+    # Set high saturation values to ensure they get clamped down during mutation
+    center["shadow_sat"] = 0.5
+    center["midtone_sat"] = 0.7
+    center["highlight_sat"] = 0.9
+    
+    mutations = generate_explore_mutations(center, "Monochromatic", variation_strength=1.5)
+    assert len(mutations) == 9
+    for i, s in enumerate(mutations):
+        # All mutations must preserve the center's exact lightness values
+        assert s["shadow_light"] == -0.3
+        assert s["midtone_light"] == 0.5
+        assert s["highlight_light"] == 0.8
+        # Outer mutations (all except index 4) must clamp saturation to [0.0, 0.20]
+        if i == 4:
+            assert s["shadow_sat"] == 0.5
+            assert s["midtone_sat"] == 0.7
+            assert s["highlight_sat"] == 0.9
+        else:
+            assert 0.0 <= s["shadow_sat"] <= 0.20
+            assert 0.0 <= s["midtone_sat"] <= 0.20
+            assert 0.0 <= s["highlight_sat"] <= 0.20
+
+

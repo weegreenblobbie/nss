@@ -77,7 +77,7 @@ class ZoneTabWidget(QWidget):
         
         self.swatch_lbl = ClickableSwatchLabel()
         self.swatch_lbl.setFixedSize(24, 24)
-        self.swatch_lbl.setStyleSheet("border: 1px solid #555; border-radius: 4px;")
+        self.swatch_lbl.setStyleSheet("border: 1px solid #cccccc; border-radius: 4px;")
         self.swatch_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         self.swatch_lbl.setToolTip("Click to open color picker wheel")
         
@@ -89,18 +89,18 @@ class ZoneTabWidget(QWidget):
         self.layout.addLayout(wheel_container)
         
         self.hue_lbl = ResetLabel(f"Hue: {default_h}°")
-        self.hue_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.hue_lbl.setStyleSheet("font-size: 11px;")
         self.hue_lbl.setToolTip("Double-click to reset Hue to default")
         
         self.sat_lbl = ResetLabel("Sat: 0.00")
-        self.sat_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.sat_lbl.setStyleSheet("font-size: 11px;")
         self.sat_lbl.setToolTip("Double-click to reset Saturation to 0.00")
         self.sat_slider = QSlider(Qt.Orientation.Horizontal)
         self.sat_slider.setRange(0, 100)
         self.sat_slider.setValue(0)
         
         self.light_lbl = ResetLabel("Luma: 0.00")
-        self.light_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.light_lbl.setStyleSheet("font-size: 11px;")
         self.light_lbl.setToolTip("Double-click to reset Luminance to 0.00")
         self.light_slider = QSlider(Qt.Orientation.Horizontal)
         self.light_slider.setRange(-100, 100)
@@ -114,7 +114,7 @@ class ZoneTabWidget(QWidget):
         
         # Saved custom colors section
         recent_lbl = QLabel("Saved Custom Colors:")
-        recent_lbl.setStyleSheet("color: #aaa; font-size: 10px; font-weight: bold; margin-top: 5px;")
+        recent_lbl.setStyleSheet("font-size: 10px; font-weight: bold; margin-top: 5px;")
         self.layout.addWidget(recent_lbl)
         
         patch_layout = QHBoxLayout()
@@ -122,7 +122,7 @@ class ZoneTabWidget(QWidget):
         patch_layout.setSpacing(6)
         
         drag_lbl = QLabel("Drag to save")
-        drag_lbl.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+        drag_lbl.setStyleSheet("font-size: 10px; font-style: italic;")
         
         patch_layout.addWidget(self.swatch_lbl)
         patch_layout.addWidget(drag_lbl)
@@ -210,12 +210,12 @@ class MasterZoneWidget(QWidget):
         
         # Title
         m_title = QLabel("MASTER DOCK CONTROLS")
-        m_title.setStyleSheet("font-weight: bold; color: #a0a0a0; border: none; border-bottom: 1px solid #444; padding-bottom: 2px;")
+        m_title.setStyleSheet("font-weight: bold; border: none; border-bottom: 1px solid #cccccc; padding-bottom: 2px;")
         self.layout.addWidget(m_title)
 
         # Master Blending
         self.blending_lbl = ResetLabel("Blending: 0.50")
-        self.blending_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.blending_lbl.setStyleSheet("font-size: 11px;")
         self.blending_lbl.setToolTip("Double-click to reset Blending to 0.50")
         self.blending_slider = QSlider(Qt.Orientation.Horizontal)
         self.blending_slider.setRange(0, 100)
@@ -223,7 +223,7 @@ class MasterZoneWidget(QWidget):
         
         # Master Balance
         self.balance_lbl = ResetLabel("Balance: 0.00")
-        self.balance_lbl.setStyleSheet("color: #ccc; font-size: 11px;")
+        self.balance_lbl.setStyleSheet("font-size: 11px;")
         self.balance_lbl.setToolTip("Double-click to reset Balance to 0.00")
         self.balance_slider = QSlider(Qt.Orientation.Horizontal)
         self.balance_slider.setRange(-100, 100)
@@ -391,7 +391,7 @@ class MainWindow(QMainWindow):
 
         self.history_label = QLabel("Step: 0 of 0")
         self.history_label.setStyleSheet(
-            "font-weight: bold; margin-left: 10px; margin-right: 10px; color: #a0a0a0;"
+            "font-weight: bold; margin-left: 10px; margin-right: 10px;"
         )
         toolbar.addWidget(self.history_label)
 
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
 
         # Intensity Label
         self.intensity_label = QLabel(" Intensity: 0.20x ")
-        self.intensity_label.setStyleSheet("color: #a0a0a0; font-weight: bold;")
+        self.intensity_label.setStyleSheet("font-weight: bold;")
         toolbar.addWidget(self.intensity_label)
 
         self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
         self.inspector_panel.setFrameShadow(QFrame.Shadow.Raised)
         self.inspector_panel.setFixedWidth(300)
         self.inspector_panel.setStyleSheet(
-            "background-color: #252525; border: 1px solid #444; border-radius: 4px;"
+            "border: 1px solid #cccccc; border-radius: 4px;"
         )
         inspector_layout = QVBoxLayout(self.inspector_panel)
         inspector_layout.setContentsMargins(15, 15, 15, 15)
@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         # Harmony Randomizer / Explore Mode Section
         harmony_box = QGroupBox("EXPLORE & HARMONY")
         harmony_box.setStyleSheet(
-            "QGroupBox { font-weight: bold; color: #40ff40; border: 1px solid #444; border-radius: 4px; margin-top: 10px; padding: 10px; }"
+            "QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 4px; margin-top: 10px; padding: 10px; }"
             "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }"
         )
         harmony_layout = QVBoxLayout(harmony_box)
@@ -471,7 +471,7 @@ class MainWindow(QMainWindow):
 
         # Explore Toggle
         self.explore_checkbox = QCheckBox("Activate Explore Mode")
-        self.explore_checkbox.setStyleSheet("font-weight: bold; color: #ddd;")
+        self.explore_checkbox.setStyleSheet("font-weight: bold;")
         self.explore_checkbox.stateChanged.connect(self.on_explore_mode_toggled)
         harmony_layout.addWidget(self.explore_checkbox)
 
@@ -485,11 +485,6 @@ class MainWindow(QMainWindow):
 
         # Manual 3-Way Tabs Setup
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet(
-            "QTabWidget::pane { border: 1px solid #444; background-color: #2b2b2b; }"
-            "QTabBar::tab { background-color: #333; color: #aaa; padding: 6px 12px; border: 1px solid #444; }"
-            "QTabBar::tab:selected { background-color: #2b2b2b; color: #eee; font-weight: bold; }"
-        )
         inspector_layout.addWidget(self.tabs)
 
         # Stateful tab widgets

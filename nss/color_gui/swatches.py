@@ -30,6 +30,14 @@ class ClickableSwatchLabel(QLabel):
         self.sat: float = 0.0
         self.drag_start_position = None
 
+    def update_color(self, hue: float, sat: float) -> None:
+        self.hue = hue
+        self.sat = sat
+        color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
+        pix = QPixmap(24, 24)
+        pix.fill(color)
+        self.setPixmap(pix)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.position()
@@ -62,7 +70,6 @@ class ColorModifyDialog(QDialog):
     def __init__(self, color: QColor, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Saved Color")
-        self.setStyleSheet("background-color: #2b2b2b; color: #eee;")
         self.current_color = QColor(color)
         self.updating = False
 
@@ -86,11 +93,11 @@ class ColorModifyDialog(QDialog):
         
         # Headers
         rgb_hdr = QLabel("RGB (0-255)")
-        rgb_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        rgb_hdr.setStyleSheet("font-weight: bold;")
         hsl_hdr = QLabel("HSL (0-255)")
-        hsl_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        hsl_hdr.setStyleSheet("font-weight: bold;")
         hsv_hdr = QLabel("HSV (0-255)")
-        hsv_hdr.setStyleSheet("font-weight: bold; color: #aaa;")
+        hsv_hdr.setStyleSheet("font-weight: bold;")
         
         grid.addWidget(rgb_hdr, 0, 0, 1, 2)
         grid.addWidget(hsl_hdr, 0, 2, 1, 2)
@@ -155,7 +162,7 @@ class ColorModifyDialog(QDialog):
         for edit in [self.r_edit, self.g_edit, self.b_edit, 
                      self.hsl_h_edit, self.hsl_s_edit, self.hsl_l_edit,
                      self.hsv_h_edit, self.hsv_s_edit, self.hsv_v_edit, self.hex_edit]:
-            edit.setStyleSheet("background-color: #3a3a3a; color: #fff; border: 1px solid #555; border-radius: 2px; padding: 2px;")
+            edit.setStyleSheet("border: 1px solid #cccccc; border-radius: 2px; padding: 2px;")
             edit.setFixedWidth(50)
         self.hex_edit.setFixedWidth(80) # Hex needs a bit more space
         
@@ -308,8 +315,8 @@ class ColorSwatch(QLabel):
             self.hue = None
             self.sat = None
             self.setStyleSheet(
-                "border: 1px dashed #555; border-radius: 4px; "
-                "background-color: #1a1a1a;"
+                "border: 1px dashed #cccccc; border-radius: 4px; "
+                "background-color: #eaeaea;"
             )
             self.setToolTip("Empty Slot. Drag a color here to save.")
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -318,7 +325,7 @@ class ColorSwatch(QLabel):
             self.sat = float(sat)
             color = QColor.fromHslF(self.hue / 360.0, self.sat, 1.0 - 0.5 * self.sat)
             self.setStyleSheet(
-                f"border: 1px solid #555; border-radius: 4px; "
+                f"border: 1px solid #cccccc; border-radius: 4px; "
                 f"background-color: {color.name()};"
             )
             self.setToolTip(f"Hue: {self.hue:.0f}°, Sat: {self.sat:.2f}")
@@ -331,10 +338,6 @@ class ColorSwatch(QLabel):
 
     def contextMenuEvent(self, event) -> None:
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background-color: #2b2b2b; color: #eee; border: 1px solid #555; }"
-            "QMenu::item:selected { background-color: #444; }"
-        )
         
         edit_action = QAction("Edit", self)
         forget_action = QAction("Forget", self)
