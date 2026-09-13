@@ -16,6 +16,7 @@ class StateNode(TypedDict):
     # Master controls for 3-way blending
     blending: float         # zone overlap / transition softness (0.0 to 1.0)
     balance: float          # bias toward shadows (-1.0) or highlights (+1.0)
+    rotation: float         # global rotation offset (-180 to 180)
     # Shadows zone (L < 0.3)
     shadow_hue: float       # target shadow tint hue (0 - 360)
     shadow_sat: float       # shadow tint strength / saturation (0.0 to 1.0)
@@ -41,6 +42,7 @@ def create_default_state(mode: Literal["Monochromatic", "Analogous", "Complement
         "step_size": 0.2,
         "blending": 0.5,        # Overlap softness
         "balance": 0.0,         # Shadow/Highlight bias
+        "rotation": 0.0,        # Global rotation
         # Shadows defaults
         "shadow_hue": 240.0,    # Default blue shadows
         "shadow_sat": 0.0,      # Default no tint strength
@@ -114,6 +116,12 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     mid_sat = state.get("midtone_sat", 0.0)
     hi_hue = state.get("highlight_hue", 60.0)
     hi_sat = state.get("highlight_sat", 0.0)
+
+    # Apply global rotation offset
+    rotation_offset = state.get("rotation", 0.0)
+    sh_hue = (sh_hue + rotation_offset) % 360.0
+    mid_hue = (mid_hue + rotation_offset) % 360.0
+    hi_hue = (hi_hue + rotation_offset) % 360.0
 
     # Complementary coupling: Force Highlights and Shadows to opposite hues
     if harmony_mode == "Complementary":
@@ -381,14 +389,14 @@ def generate_random_harmony_state(mode: str) -> StateNode:
         
     H = random.uniform(0.0, 360.0)
     
-    # Step A: Generate Zone-Constrained Saturation & Luminance (Luminance neutral, Saturation clamped to [0.0, 0.20])
-    sh_sat = random.uniform(0.0, 0.20)
+    # Step A: Generate Zone-Constrained Saturation & Luminance (Luminance neutral, Saturation clamped to [0.0, 0.10])
+    sh_sat = random.uniform(0.0, 0.10)
     sh_light = 0.0
     
-    mid_sat = random.uniform(0.0, 0.20)
+    mid_sat = random.uniform(0.0, 0.10)
     mid_light = 0.0
     
-    hi_sat = random.uniform(0.0, 0.20)
+    hi_sat = random.uniform(0.0, 0.10)
     hi_light = 0.0
     
     # Step B: Map Hues to Zones based on Harmony Mode
@@ -446,17 +454,17 @@ def generate_explore_mutations(center: StateNode, mode: str, variation_strength:
             # Mutate each zone (Shadows, Midtones, Highlights)
             # Shadows
             mutated["shadow_hue"] = float((center["shadow_hue"] + j(hue_var)) % 360.0)
-            mutated["shadow_sat"] = float(np.clip(center["shadow_sat"] + j(sat_light_var), 0.0, 0.20))
+            mutated["shadow_sat"] = float(np.clip(center["shadow_sat"] + j(sat_light_var), 0.0, 0.10))
             mutated["shadow_light"] = float(center["shadow_light"])
             
             # Midtones
             mutated["midtone_hue"] = float((center["midtone_hue"] + j(hue_var)) % 360.0)
-            mutated["midtone_sat"] = float(np.clip(center["midtone_sat"] + j(sat_light_var), 0.0, 0.20))
+            mutated["midtone_sat"] = float(np.clip(center["midtone_sat"] + j(sat_light_var), 0.0, 0.10))
             mutated["midtone_light"] = float(center["midtone_light"])
             
             # Highlights
             mutated["highlight_hue"] = float((center["highlight_hue"] + j(hue_var)) % 360.0)
-            mutated["highlight_sat"] = float(np.clip(center["highlight_sat"] + j(sat_light_var), 0.0, 0.20))
+            mutated["highlight_sat"] = float(np.clip(center["highlight_sat"] + j(sat_light_var), 0.0, 0.10))
             mutated["highlight_light"] = float(center["highlight_light"])
             
             states.append(mutated)

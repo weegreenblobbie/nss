@@ -229,21 +229,34 @@ class MasterZoneWidget(QWidget):
         self.balance_slider.setRange(-100, 100)
         self.balance_slider.setValue(0)
 
+        # Global Rotation
+        self.rotation_lbl = ResetLabel("Rotation: 0°")
+        self.rotation_lbl.setStyleSheet("font-size: 11px;")
+        self.rotation_lbl.setToolTip("Double-click to reset Rotation to 0°")
+        self.rotation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rotation_slider.setRange(-180, 180)
+        self.rotation_slider.setValue(0)
+
         self.layout.addWidget(self.blending_lbl)
         self.layout.addWidget(self.blending_slider)
         self.layout.addWidget(self.balance_lbl)
         self.layout.addWidget(self.balance_slider)
+        self.layout.addWidget(self.rotation_lbl)
+        self.layout.addWidget(self.rotation_slider)
         
         self.blending_slider.valueChanged.connect(self.on_changed_slot)
         self.balance_slider.valueChanged.connect(self.on_changed_slot)
+        self.rotation_slider.valueChanged.connect(self.on_changed_slot)
         
         # Release trigger for Memento
         self.blending_slider.sliderReleased.connect(self.parent_slider_released)
         self.balance_slider.sliderReleased.connect(self.parent_slider_released)
+        self.rotation_slider.sliderReleased.connect(self.parent_slider_released)
         
         # Double click to reset
         self.blending_lbl.doubleClicked.connect(lambda: self.reset_slider(self.blending_slider, 50))
         self.balance_lbl.doubleClicked.connect(lambda: self.reset_slider(self.balance_slider, 0))
+        self.rotation_lbl.doubleClicked.connect(lambda: self.reset_slider(self.rotation_slider, 0))
 
     def reset_slider(self, slider: QSlider, value: int) -> None:
         slider.setValue(value)
@@ -259,6 +272,7 @@ class MasterZoneWidget(QWidget):
             self.STATE_KEY: {
                 "blending": self.blending_slider.value() / 100.0,
                 "balance": self.balance_slider.value() / 100.0,
+                "rotation": float(self.rotation_slider.value()),
             }
         }
         
@@ -267,16 +281,20 @@ class MasterZoneWidget(QWidget):
             state = full_state_dict[self.STATE_KEY]
             self.blending_slider.blockSignals(True)
             self.balance_slider.blockSignals(True)
+            self.rotation_slider.blockSignals(True)
             
             self.blending_slider.setValue(int(state["blending"] * 100.0))
             self.balance_slider.setValue(int(state["balance"] * 100.0))
+            self.rotation_slider.setValue(int(state.get("rotation", 0.0)))
             
             # Update labels
             self.blending_lbl.setText(f"Blending: {state['blending']:.2f}")
             self.balance_lbl.setText(f"Balance: {state['balance']:+.2f}")
+            self.rotation_lbl.setText(f"Rotation: {state.get('rotation', 0.0):.0f}°")
             
             self.blending_slider.blockSignals(False)
             self.balance_slider.blockSignals(False)
+            self.rotation_slider.blockSignals(False)
 
 
 class GradingWorker(QThread):
@@ -618,6 +636,7 @@ class MainWindow(QMainWindow):
         m_state = snapshot.get("master_zone", {})
         state["blending"] = m_state.get("blending", 0.5)
         state["balance"] = m_state.get("balance", 0.0)
+        state["rotation"] = m_state.get("rotation", 0.0)
 
         return state
 
@@ -629,7 +648,7 @@ class MainWindow(QMainWindow):
             "shadows_zone": {"hue": state["shadow_hue"], "sat": state["shadow_sat"], "light": state["shadow_light"]},
             "midtones_zone": {"hue": state["midtone_hue"], "sat": state["midtone_sat"], "light": state["midtone_light"]},
             "highlights_zone": {"hue": state["highlight_hue"], "sat": state["highlight_sat"], "light": state["highlight_light"]},
-            "master_zone": {"blending": state["blending"], "balance": state["balance"]},
+            "master_zone": {"blending": state["blending"], "balance": state["balance"], "rotation": state.get("rotation", 0.0)},
             "explore_widget": {"harmony_mode": state["harmony_mode"], "variation_strength": self.explore_widget.variation_strength},
         }
         self.state_manager.restore_snapshot(snapshot)
@@ -711,16 +730,39 @@ class MainWindow(QMainWindow):
         if self.proxy_image is None:
             return
             
-        mode = self.harmony_dropdown.currentText()
-        random_state = generate_random_harmony_state(mode)
+        # Capture current blending and balance before randomizing so they remain exactly where they are
+        snapshot = self.state_manager.capture_snapshot()
+        curr_state = self.rebuild_state_node_from_memento(snapshot)
+        curr_blending = curr_state.get("blending", 0.5)
+        curr_balance = curr_state.get("balance", 0.0)
         
-        # Reset variation strength for first generation
-        self.explore_widget.variation_strength = 1.0
+        # Zero out the Rotation slider/label automatically
+        self.master_zone.rotation_slider.blockSignals(True)
+        self.master_zone.rotation_slider.setValue(0)
+        self.master_zone.rotation_lbl.setText("Rotation: 0°")
+        self.master_zone.rotation_slider.blockSignals(False)
         
-        # Sync widget values and record discrete state
-        self.apply_state_node_to_widgets(random_state)
-        self.on_discrete_action()
-        self.statusBar().showMessage("Generated a brand new random harmony look!")
+        if self.explore_checkbox.isChecked():
+            # Lock/keep the center baseline state, with rotation reset to 0, and regenerate the 8 outer mutations
+            curr_state["rotation"] = 0.0
+            self.start_explore_mutations_render(curr_state)
+            self.statusBar().showMessage("Regenerated 8 outer mutations based on current center baseline.")
+        else:
+            mode = self.harmony_dropdown.currentText()
+            random_state = generate_random_harmony_state(mode)
+            
+            # Keep global blending and balance exactly where they were
+            random_state["blending"] = curr_blending
+            random_state["balance"] = curr_balance
+            random_state["rotation"] = 0.0
+            
+            # Reset variation strength for first generation
+            self.explore_widget.variation_strength = 1.0
+            
+            # Sync widget values and record discrete state
+            self.apply_state_node_to_widgets(random_state)
+            self.on_discrete_action()
+            self.statusBar().showMessage("Generated a brand new random harmony look!")
 
     def on_explore_container_clicked(self, index: int) -> None:
         """
@@ -772,26 +814,61 @@ class MainWindow(QMainWindow):
         Triggered when manual sliders or wheels values are dragged/shifted in real-time.
         Renders the active center single image immediately without capturing discrete Memento snapshots.
         """
-        if self.master_image is None or self.proxy_image is None:
-            return
-
         # Build StateNode from current widget states directly
         snapshot = self.state_manager.capture_snapshot()
         state = self.rebuild_state_node_from_memento(snapshot)
         
+        rot = state["rotation"]
+        eff_sh_hue = (state["shadow_hue"] + rot) % 360.0
+        eff_mid_hue = (state["midtone_hue"] + rot) % 360.0
+        eff_hi_hue = (state["highlight_hue"] + rot) % 360.0
+        
+        # Update numerical labels dynamically in real-time with effective hues
+        self.sh_zone.hue_lbl.setText(f"Hue: {eff_sh_hue:.0f}°")
+        self.sh_zone.sat_lbl.setText(f"Sat: {state['shadow_sat']:.2f}")
+        self.sh_zone.light_lbl.setText(f"Luma: {state['shadow_light']:+.2f}")
+        
+        self.mid_zone.hue_lbl.setText(f"Hue: {eff_mid_hue:.0f}°")
+        self.mid_zone.sat_lbl.setText(f"Sat: {state['midtone_sat']:.2f}")
+        self.mid_zone.light_lbl.setText(f"Luma: {state['midtone_light']:+.2f}")
+        
+        self.hi_zone.hue_lbl.setText(f"Hue: {eff_hi_hue:.0f}°")
+        self.hi_zone.sat_lbl.setText(f"Sat: {state['highlight_sat']:.2f}")
+        self.hi_zone.light_lbl.setText(f"Luma: {state['highlight_light']:+.2f}")
+        
+        self.master_zone.blending_lbl.setText(f"Blending: {state['blending']:.2f}")
+        self.master_zone.balance_lbl.setText(f"Balance: {state['balance']:+.2f}")
+        self.master_zone.rotation_lbl.setText(f"Rotation: {rot:.0f}°")
+
+        # Update visual color wheel indicators/rotation offsets/saturation in real-time
+        self.sh_zone.wheel.rotation_offset = rot
+        self.mid_zone.wheel.rotation_offset = rot
+        self.hi_zone.wheel.rotation_offset = rot
+        
+        self.sh_zone.wheel.sat = state["shadow_sat"]
+        self.mid_zone.wheel.sat = state["midtone_sat"]
+        self.hi_zone.wheel.sat = state["highlight_sat"]
+        
+        self.sh_zone.wheel.update()
+        self.mid_zone.wheel.update()
+        self.hi_zone.wheel.update()
+
+        if self.master_image is None or self.proxy_image is None:
+            return
+
         # Update swatches and single view preview instantly
-        self.sh_zone.swatch_lbl.hue = state["shadow_hue"]
+        self.sh_zone.swatch_lbl.hue = eff_sh_hue
         self.sh_zone.swatch_lbl.sat = state["shadow_sat"]
         
-        self.mid_zone.swatch_lbl.hue = state["midtone_hue"]
+        self.mid_zone.swatch_lbl.hue = eff_mid_hue
         self.mid_zone.swatch_lbl.sat = state["midtone_sat"]
         
-        self.hi_zone.swatch_lbl.hue = state["highlight_hue"]
+        self.hi_zone.swatch_lbl.hue = eff_hi_hue
         self.hi_zone.swatch_lbl.sat = state["highlight_sat"]
         
-        self.sh_zone.swatch_lbl.update_color(state["shadow_hue"], state["shadow_sat"])
-        self.mid_zone.swatch_lbl.update_color(state["midtone_hue"], state["midtone_sat"])
-        self.hi_zone.swatch_lbl.update_color(state["highlight_hue"], state["highlight_sat"])
+        self.sh_zone.swatch_lbl.update_color(eff_sh_hue, state["shadow_sat"])
+        self.mid_zone.swatch_lbl.update_color(eff_mid_hue, state["midtone_sat"])
+        self.hi_zone.swatch_lbl.update_color(eff_hi_hue, state["highlight_sat"])
         
         graded_center = apply_grading(self.proxy_image, state)
         self.single_preview.set_image(graded_center)

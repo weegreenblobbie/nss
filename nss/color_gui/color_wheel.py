@@ -34,6 +34,7 @@ class ColorWheel(QWidget):
         super().__init__(parent)
         self.hue: float = 0.0  # Range: [0.0, 360.0]
         self.sat: float = 0.0  # Range: [0.0, 1.0]
+        self.rotation_offset: float = 0.0  # Real-time rotation offset
         self.setMinimumSize(160, 160)
         self.setMaximumSize(240, 240)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -63,7 +64,7 @@ class ColorWheel(QWidget):
         conical = QConicalGradient(cx, cy, 0.0)
         for i in range(361):
             conical.setColorAt(i / 360.0, QColor.fromHslF(i / 360.0, 1.0, 0.5))
-        
+
         painter.setBrush(conical)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(int(cx - radius), int(cy - radius), int(radius * 2), int(radius * 2))
@@ -76,8 +77,9 @@ class ColorWheel(QWidget):
         painter.setBrush(radial)
         painter.drawEllipse(int(cx - radius), int(cy - radius), int(radius * 2), int(radius * 2))
 
-        # 3. Draw indicator/handle
-        angle_rad = math.radians(self.hue)
+        # 3. Draw indicator/handle using effective hue (including rotation offset)
+        effective_hue = (self.hue + self.rotation_offset) % 360.0
+        angle_rad = math.radians(effective_hue)
         d = self.sat * radius
         px = cx + d * math.cos(angle_rad)
         py = cy - d * math.sin(angle_rad)

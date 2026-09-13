@@ -128,10 +128,10 @@ def test_explore_mode_constraints() -> None:
         assert state["shadow_light"] == 0.0
         assert state["midtone_light"] == 0.0
         assert state["highlight_light"] == 0.0
-        # Saturation must be constrained to [0.0, 0.20]
-        assert 0.0 <= state["shadow_sat"] <= 0.20
-        assert 0.0 <= state["midtone_sat"] <= 0.20
-        assert 0.0 <= state["highlight_sat"] <= 0.20
+        # Saturation must be constrained to [0.0, 0.10]
+        assert 0.0 <= state["shadow_sat"] <= 0.10
+        assert 0.0 <= state["midtone_sat"] <= 0.10
+        assert 0.0 <= state["highlight_sat"] <= 0.10
 
     # 2. Test generate_explore_mutations
     center = create_default_state("Monochromatic")
@@ -151,14 +151,39 @@ def test_explore_mode_constraints() -> None:
         assert s["shadow_light"] == -0.3
         assert s["midtone_light"] == 0.5
         assert s["highlight_light"] == 0.8
-        # Outer mutations (all except index 4) must clamp saturation to [0.0, 0.20]
+        # Outer mutations (all except index 4) must clamp saturation to [0.0, 0.10]
         if i == 4:
             assert s["shadow_sat"] == 0.5
             assert s["midtone_sat"] == 0.7
             assert s["highlight_sat"] == 0.9
         else:
-            assert 0.0 <= s["shadow_sat"] <= 0.20
-            assert 0.0 <= s["midtone_sat"] <= 0.20
-            assert 0.0 <= s["highlight_sat"] <= 0.20
+            assert 0.0 <= s["shadow_sat"] <= 0.10
+            assert 0.0 <= s["midtone_sat"] <= 0.10
+            assert 0.0 <= s["highlight_sat"] <= 0.10
+
+
+def test_apply_grading_rotation_offset() -> None:
+    import cv2
+    img = np.zeros((15, 12, 3), dtype=np.float32)
+    img[:, :6, 0] = 0.1  # Shadows
+    img[:, 6:, 0] = 0.9  # Highlights
+    img[:, 6:, 1] = 0.8
+    img[:, 6:, 2] = 0.8
+    
+    state = create_default_state("Complementary")
+    state["highlight_hue"] = 120.0  # Green highlights
+    state["rotation"] = 30.0  # Shift hues by +30 degrees
+    # Highlight hue rotated: 120 + 30 = 150
+    # Shadow hue rotated: 120 + 180 = 300; 300 + 30 = 330
+    
+    graded = apply_grading(img, state)
+    hls = cv2.cvtColor(graded, cv2.COLOR_RGB2HLS)
+    H = hls[:, :, 0]
+    
+    # Shadows (left half) should have shadow hue = 330
+    assert np.all(np.isclose(H[:, :6], 330.0, atol=3.0))
+    # Highlights (right half) should have highlight hue = 150
+    assert np.all(np.isclose(H[:, 6:], 150.0, atol=3.0))
+
 
 
