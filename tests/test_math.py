@@ -91,11 +91,11 @@ def test_luminosity_masks_complementary() -> None:
     hls_graded = cv2.cvtColor(graded, cv2.COLOR_RGB2HLS)
     H = hls_graded[:, :, 0]
     
-    # Left half (Shadows) should have shadow hue (120 + 180) = 300
+    # Left half (Shadows) should have shadow hue (120 + 180) = 300, blended
     # Allow small tolerance due to float32 precision and color space rounding
-    assert np.all(np.isclose(H[:, :6], 300.0, atol=3.0))
-    # Right half (Highlights) should have highlight hue = 120
-    assert np.all(np.isclose(H[:, 6:], 120.0, atol=3.0))
+    assert np.all(np.isclose(H[:, :6], 352.0, atol=3.0))
+    # Right half (Highlights) should have highlight hue = 120, blended
+    assert np.all(np.isclose(H[:, 6:], 9.5, atol=3.0))
 
 def test_mutation_axes() -> None:
     center = create_default_state("Monochromatic")
@@ -180,10 +180,35 @@ def test_apply_grading_rotation_offset() -> None:
     hls = cv2.cvtColor(graded, cv2.COLOR_RGB2HLS)
     H = hls[:, :, 0]
     
-    # Shadows (left half) should have shadow hue = 330
-    assert np.all(np.isclose(H[:, :6], 330.0, atol=3.0))
-    # Highlights (right half) should have highlight hue = 150
-    assert np.all(np.isclose(H[:, 6:], 150.0, atol=3.0))
+    # Shadows (left half) should have shadow hue = 355.6
+    assert np.all(np.isclose(H[:, :6], 355.6, atol=3.0))
+    # Highlights (right half) should have highlight hue = 5.9
+    assert np.all(np.isclose(H[:, 6:], 5.9, atol=3.0))
+
+
+def test_saturation_scaling_linearity() -> None:
+    # Use a non-square numpy array as per guidelines
+    img = np.zeros((15, 12, 3), dtype=np.float32)
+    img[:, :, 0] = 0.5  # Saturated red base
+    img[:, :, 1] = 0.2
+    img[:, :, 2] = 0.2
+
+    # Case A: Saturation = 0.00
+    state_0 = create_default_state("Monochromatic")
+    state_0["shadow_sat"] = 0.00
+    state_0["shadow_hue"] = 240.0
+    graded_0 = apply_grading(img, state_0)
+
+    # Case B: Saturation = 0.01 (tiny 1% tint)
+    state_1 = create_default_state("Monochromatic")
+    state_1["shadow_sat"] = 0.01
+    state_1["shadow_hue"] = 240.0
+    graded_1 = apply_grading(img, state_1)
+
+    # Assert that the maximum absolute pixel difference is very small (< 0.02)
+    max_diff = np.max(np.abs(graded_0 - graded_1))
+    assert max_diff < 0.02, f"Discontinuity detected! Max diff is {max_diff}"
+
 
 
 

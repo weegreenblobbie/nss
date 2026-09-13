@@ -72,14 +72,15 @@ def test_manual_slider_changed_no_crash() -> None:
     window.proxy_image = dummy_img
     
     # Set non-zero, distinct values to verify they flow correctly through the logic
-    window.sh_zone.wheel.set_color(120.5, 0.15)
+    window.sh_zone.hue_slider.setValue(120)
+    window.sh_zone.wheel.set_color(120.0, 0.15)
     window.sh_zone.sat_slider.setValue(15)
     
     # Simulate trigger of manual slider change
     window.on_manual_slider_changed()
     
     # Ensure swatch_lbl received the values and set values on it correctly
-    assert window.sh_zone.swatch_lbl.hue == 120.5
+    assert window.sh_zone.swatch_lbl.hue == 120.0
     assert window.sh_zone.swatch_lbl.sat == 0.15
 
 
@@ -95,7 +96,8 @@ def test_explore_mode_randomize_locks_center() -> None:
     window.proxy_image = dummy_img
     
     # Establish a baseline state
-    window.sh_zone.wheel.set_color(120.5, 0.15)
+    window.sh_zone.hue_slider.setValue(120)
+    window.sh_zone.wheel.set_color(120.0, 0.15)
     window.sh_zone.sat_slider.setValue(15)
     
     # Enable Explore Mode
@@ -104,7 +106,7 @@ def test_explore_mode_randomize_locks_center() -> None:
     # Read the established center state
     snapshot = window.state_manager.capture_snapshot()
     baseline_state = window.rebuild_state_node_from_memento(snapshot)
-    assert baseline_state["shadow_hue"] == 120.5
+    assert baseline_state["shadow_hue"] == 120.0
     assert baseline_state["shadow_sat"] == 0.15
     
     # Clicking on the randomize/generate button should lock/keep the center
@@ -116,12 +118,12 @@ def test_explore_mode_randomize_locks_center() -> None:
     assert len(window.grid_states) == 9
     
     # Center state (index 4) must be exactly identical to our baseline state
-    assert window.grid_states[4]["shadow_hue"] == 120.5
+    assert window.grid_states[4]["shadow_hue"] == 120.0
     assert window.grid_states[4]["shadow_sat"] == 0.15
     
     # Outer states must be randomly mutated (so at least some of them differ from the center)
     outer_hues = [window.grid_states[i]["shadow_hue"] for i in range(9) if i != 4]
-    assert any(h != 120.5 for h in outer_hues)
+    assert any(h != 120.0 for h in outer_hues)
 
 
 def test_slider_label_updates_value_flow() -> None:
@@ -233,6 +235,37 @@ def test_saturation_slider_propagates_to_wheel() -> None:
     # Move Highlights saturation slider to 84%
     window.hi_zone.sat_slider.setValue(84)
     assert window.hi_zone.wheel.sat == 0.84
+
+
+def test_zone_hue_sliders_and_rotation_interaction() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    # 1. Simulate dragging the Shadows Hue slider to 145 degrees
+    window.sh_zone.hue_slider.setValue(145)
+
+    # By default, Rotation is 0, so effective hue is 145
+    assert window.sh_zone.hue_lbl.text() == "Hue: 145°"
+    assert window.sh_zone.wheel.hue == 145.0
+    assert window.sh_zone.wheel.rotation_offset == 0.0
+
+    # 2. Move global Rotation slider to +30 degrees
+    window.master_zone.rotation_slider.setValue(30)
+
+    # Re-verify that effective hue label reflects (145 + 30) % 360 = 175°
+    assert window.sh_zone.hue_lbl.text() == "Hue: 175°"
+    assert window.sh_zone.wheel.hue == 145.0
+    assert window.sh_zone.wheel.rotation_offset == 30.0
+
+    # 3. Drag Midtones Hue slider to 350 degrees, and set Rotation to +20 degrees
+    window.mid_zone.hue_slider.setValue(350)
+    window.master_zone.rotation_slider.setValue(20)
+
+    # Re-verify that Midtones effective hue is (350 + 20) % 360 = 10°
+    assert window.mid_zone.hue_lbl.text() == "Hue: 10°"
+    assert window.mid_zone.wheel.hue == 350.0
+    assert window.mid_zone.wheel.rotation_offset == 20.0
+
 
 
 

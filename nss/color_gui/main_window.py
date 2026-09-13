@@ -91,6 +91,9 @@ class ZoneTabWidget(QWidget):
         self.hue_lbl = ResetLabel(f"Hue: {default_h}°")
         self.hue_lbl.setStyleSheet("font-size: 11px;")
         self.hue_lbl.setToolTip("Double-click to reset Hue to default")
+        self.hue_slider = QSlider(Qt.Orientation.Horizontal)
+        self.hue_slider.setRange(0, 360)
+        self.hue_slider.setValue(default_h)
         
         self.sat_lbl = ResetLabel("Sat: 0.00")
         self.sat_lbl.setStyleSheet("font-size: 11px;")
@@ -107,6 +110,7 @@ class ZoneTabWidget(QWidget):
         self.light_slider.setValue(0)
         
         self.layout.addWidget(self.hue_lbl)
+        self.layout.addWidget(self.hue_slider)
         self.layout.addWidget(self.sat_lbl)
         self.layout.addWidget(self.sat_slider)
         self.layout.addWidget(self.light_lbl)
@@ -138,9 +142,11 @@ class ZoneTabWidget(QWidget):
         self.layout.addStretch()
         
         # Wire signals
+        self.hue_slider.valueChanged.connect(self.on_changed_slot)
         self.sat_slider.valueChanged.connect(self.on_changed_slot)
         self.light_slider.valueChanged.connect(self.on_changed_slot)
         
+        self.hue_slider.sliderReleased.connect(self.parent_slider_released)
         self.sat_slider.sliderReleased.connect(self.parent_slider_released)
         self.light_slider.sliderReleased.connect(self.parent_slider_released)
         self.wheel.interactionFinished.connect(self.parent_wheel_released)
@@ -158,7 +164,7 @@ class ZoneTabWidget(QWidget):
     def get_state(self) -> dict:
         return {
             self.STATE_KEY: {
-                "hue": float(self.wheel.hue),
+                "hue": float(self.hue_slider.value()),
                 "sat": self.sat_slider.value() / 100.0,
                 "light": self.light_slider.value() / 100.0,
             }
@@ -170,8 +176,10 @@ class ZoneTabWidget(QWidget):
             self.wheel.blockSignals(True)
             self.sat_slider.blockSignals(True)
             self.light_slider.blockSignals(True)
+            self.hue_slider.blockSignals(True)
             
             self.wheel.set_color(state["hue"], state["sat"])
+            self.hue_slider.setValue(int(state["hue"]))
             self.sat_slider.setValue(int(state["sat"] * 100.0))
             self.light_slider.setValue(int(state["light"] * 100.0))
             
@@ -183,6 +191,7 @@ class ZoneTabWidget(QWidget):
             self.wheel.blockSignals(False)
             self.sat_slider.blockSignals(False)
             self.light_slider.blockSignals(False)
+            self.hue_slider.blockSignals(False)
 
 
 class ShadowsZoneWidget(ZoneTabWidget):
@@ -509,21 +518,21 @@ class MainWindow(QMainWindow):
         self.sh_zone = ShadowsZoneWidget("Shadows", 240, self.on_manual_slider_changed, self)
         self.tabs.addTab(self.sh_zone, "Shadows")
         self.sh_zone.wheel.colorChanged.connect(self.on_sh_wheel_changed)
-        self.sh_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.sh_zone.wheel, 240))
+        self.sh_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_hue(self.sh_zone, 240))
         self.sh_zone.sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_zone.sat_slider, 0))
         self.sh_zone.light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.sh_zone.light_slider, 0))
 
         self.mid_zone = MidtonesZoneWidget("Midtones", 120, self.on_manual_slider_changed, self)
         self.tabs.addTab(self.mid_zone, "Midtones")
         self.mid_zone.wheel.colorChanged.connect(self.on_mid_wheel_changed)
-        self.mid_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.mid_zone.wheel, 120))
+        self.mid_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_hue(self.mid_zone, 120))
         self.mid_zone.sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_zone.sat_slider, 0))
         self.mid_zone.light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.mid_zone.light_slider, 0))
 
         self.hi_zone = HighlightsZoneWidget("Highlights", 60, self.on_manual_slider_changed, self)
         self.tabs.addTab(self.hi_zone, "Highlights")
         self.hi_zone.wheel.colorChanged.connect(self.on_hi_wheel_changed)
-        self.hi_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_wheel_hue(self.hi_zone.wheel, 60))
+        self.hi_zone.hue_lbl.doubleClicked.connect(lambda: self.reset_hue(self.hi_zone, 60))
         self.hi_zone.sat_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_zone.sat_slider, 0))
         self.hi_zone.light_lbl.doubleClicked.connect(lambda: self.reset_slider(self.hi_zone.light_slider, 0))
 
@@ -840,7 +849,7 @@ class MainWindow(QMainWindow):
         self.master_zone.balance_lbl.setText(f"Balance: {state['balance']:+.2f}")
         self.master_zone.rotation_lbl.setText(f"Rotation: {rot:.0f}°")
 
-        # Update visual color wheel indicators/rotation offsets/saturation in real-time
+        # Update visual color wheel indicators/rotation offsets/saturation/hue in real-time
         self.sh_zone.wheel.rotation_offset = rot
         self.mid_zone.wheel.rotation_offset = rot
         self.hi_zone.wheel.rotation_offset = rot
@@ -848,6 +857,10 @@ class MainWindow(QMainWindow):
         self.sh_zone.wheel.sat = state["shadow_sat"]
         self.mid_zone.wheel.sat = state["midtone_sat"]
         self.hi_zone.wheel.sat = state["highlight_sat"]
+        
+        self.sh_zone.wheel.hue = state["shadow_hue"]
+        self.mid_zone.wheel.hue = state["midtone_hue"]
+        self.hi_zone.wheel.hue = state["highlight_hue"]
         
         self.sh_zone.wheel.update()
         self.mid_zone.wheel.update()
@@ -877,22 +890,34 @@ class MainWindow(QMainWindow):
         self.sh_zone.sat_slider.blockSignals(True)
         self.sh_zone.sat_slider.setValue(int(sat * 100.0))
         self.sh_zone.sat_slider.blockSignals(False)
+        self.sh_zone.hue_slider.blockSignals(True)
+        self.sh_zone.hue_slider.setValue(int(hue))
+        self.sh_zone.hue_slider.blockSignals(False)
         self.on_manual_slider_changed()
 
     def on_mid_wheel_changed(self, hue: float, sat: float) -> None:
         self.mid_zone.sat_slider.blockSignals(True)
         self.mid_zone.sat_slider.setValue(int(sat * 100.0))
         self.mid_zone.sat_slider.blockSignals(False)
+        self.mid_zone.hue_slider.blockSignals(True)
+        self.mid_zone.hue_slider.setValue(int(hue))
+        self.mid_zone.hue_slider.blockSignals(False)
         self.on_manual_slider_changed()
 
     def on_hi_wheel_changed(self, hue: float, sat: float) -> None:
         self.hi_zone.sat_slider.blockSignals(True)
         self.hi_zone.sat_slider.setValue(int(sat * 100.0))
         self.hi_zone.sat_slider.blockSignals(False)
+        self.hi_zone.hue_slider.blockSignals(True)
+        self.hi_zone.hue_slider.setValue(int(hue))
+        self.hi_zone.hue_slider.blockSignals(False)
         self.on_manual_slider_changed()
 
-    def reset_wheel_hue(self, wheel: ColorWheel, default_hue: float) -> None:
-        wheel.set_color(default_hue, wheel.sat)
+    def reset_hue(self, zone: ZoneTabWidget, default_hue: float) -> None:
+        zone.hue_slider.blockSignals(True)
+        zone.hue_slider.setValue(int(default_hue))
+        zone.hue_slider.blockSignals(False)
+        zone.wheel.set_color(default_hue, zone.wheel.sat)
         self.on_manual_slider_changed()
         self.on_discrete_action()
 

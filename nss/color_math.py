@@ -153,10 +153,15 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
 
         # Reconstruct target Hue via arctan2 and convert back to [0, 360) degrees
         target_h_rad = np.arctan2(y_comp, x_comp)
-        target_h = np.degrees(target_h_rad) % 360.0
         
-        # Set Hue channel directly to target Hue to prevent muddy partial hue shifts
-        H[tint_mask] = target_h
+        # Softly blend original Hue with target Hue using total_tint_weight as factor to ensure linear scaling
+        w = np.clip(total_tint_weight[tint_mask], 0.0, 1.0)
+        orig_h_rad = np.radians(H[tint_mask])
+        
+        x_blend = (1.0 - w) * np.cos(orig_h_rad) + w * np.cos(target_h_rad)
+        y_blend = (1.0 - w) * np.sin(orig_h_rad) + w * np.sin(target_h_rad)
+        
+        H[tint_mask] = np.degrees(np.arctan2(y_blend, x_blend)) % 360.0
         
         # Softly scale/inject Saturation
         S[tint_mask] = np.clip(S[tint_mask] + total_tint_weight[tint_mask], 0.0, 1.0)
