@@ -7,6 +7,9 @@ from PyQt6.QtWidgets import (
     QLabel,
     QFrame,
     QMenu,
+    QVBoxLayout,
+    QHBoxLayout,
+    QSlider,
 )
 from PyQt6.QtGui import (
     QMouseEvent,
@@ -136,16 +139,24 @@ class ExploreWidget(QWidget):
     STATE_KEY = "explore_widget"
     container_clicked = pyqtSignal(int)
     container_edit_requested = pyqtSignal(int)
+    variation_changed = pyqtSignal(float)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.harmony_mode: str = "Monochromatic"
-        self.variation_strength: float = 1.0  # Starts large, shrinks on promote
+        
+        # Main Layout
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(10)
+        self.setLayout(self.main_layout)
         
         # Grid Layout
-        self.grid_layout = QGridLayout(self)
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout(self.grid_widget)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
         self.grid_layout.setSpacing(10)
+        self.main_layout.addWidget(self.grid_widget, stretch=1)
 
         # 3x3 Containers
         self.containers: List[ImageContainer] = []
@@ -166,6 +177,36 @@ class ExploreWidget(QWidget):
             else:
                 container.set_active(False)
                 container.setText(f"Mutation {i}")
+
+        # Slider Layout for Variation Strength
+        slider_row = QHBoxLayout()
+        self.var_label = QLabel("Variation Strength: 100%")
+        self.var_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        self.var_slider = QSlider(Qt.Orientation.Horizontal)
+        self.var_slider.setRange(0, 100)
+        self.var_slider.setValue(100)
+        
+        slider_row.addWidget(self.var_label)
+        slider_row.addWidget(self.var_slider)
+        self.main_layout.addLayout(slider_row)
+
+        self.var_slider.valueChanged.connect(self.on_slider_changed)
+
+    def on_slider_changed(self, value: int) -> None:
+        self.var_label.setText(f"Variation Strength: {value}%")
+        self.variation_changed.emit(value / 100.0)
+
+    @property
+    def variation_strength(self) -> float:
+        return self.var_slider.value() / 100.0
+
+    @variation_strength.setter
+    def variation_strength(self, value: float) -> None:
+        # Prevent recursive/redundant signals during setting
+        self.var_slider.blockSignals(True)
+        self.var_slider.setValue(int(value * 100.0))
+        self.var_label.setText(f"Variation Strength: {int(value * 100.0)}%")
+        self.var_slider.blockSignals(False)
 
     def get_state(self) -> dict:
         """

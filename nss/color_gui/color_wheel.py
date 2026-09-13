@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from typing import Optional
-from PyQt6.QtCore import Qt, pyqtSignal, QPointF
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
 from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtGui import (
     QMouseEvent,
@@ -10,6 +10,7 @@ from PyQt6.QtGui import (
     QRadialGradient,
     QPen,
     QColor,
+    QBrush,
 )
 
 class ResetLabel(QLabel):
@@ -35,6 +36,8 @@ class ColorWheel(QWidget):
         self.hue: float = 0.0  # Range: [0.0, 360.0]
         self.sat: float = 0.0  # Range: [0.0, 1.0]
         self.rotation_offset: float = 0.0  # Real-time rotation offset
+        self.show_all_tones: bool = False
+        self.all_tones_data: dict = {}
         self.setMinimumSize(160, 160)
         self.setMaximumSize(240, 240)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -78,17 +81,38 @@ class ColorWheel(QWidget):
         painter.drawEllipse(int(cx - radius), int(cy - radius), int(radius * 2), int(radius * 2))
 
         # 3. Draw indicator/handle using effective hue (including rotation offset)
-        effective_hue = (self.hue + self.rotation_offset) % 360.0
-        angle_rad = math.radians(effective_hue)
-        d = self.sat * radius
-        px = cx + d * math.cos(angle_rad)
-        py = cy - d * math.sin(angle_rad)
+        if self.show_all_tones and self.all_tones_data:
+            for label, (base_hue, sat) in self.all_tones_data.items():
+                eff_hue = (base_hue + self.rotation_offset) % 360.0
+                angle_rad = math.radians(eff_hue)
+                d = sat * radius
+                px = cx + d * math.cos(angle_rad)
+                py = cy - d * math.sin(angle_rad)
+                
+                # Draw high-contrast circular badge with text centered inside
+                painter.setBrush(QBrush(Qt.GlobalColor.black))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(QPointF(px, py), 7.0, 7.0)
+                
+                font = painter.font()
+                font.setBold(True)
+                font.setPointSize(9)
+                painter.setFont(font)
+                
+                painter.setPen(QPen(Qt.GlobalColor.white))
+                painter.drawText(QRectF(px - 8, py - 8, 16, 16), Qt.AlignmentFlag.AlignCenter, label)
+        else:
+            effective_hue = (self.hue + self.rotation_offset) % 360.0
+            angle_rad = math.radians(effective_hue)
+            d = self.sat * radius
+            px = cx + d * math.cos(angle_rad)
+            py = cy - d * math.sin(angle_rad)
 
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(Qt.GlobalColor.black, 2))
-        painter.drawEllipse(QPointF(px, py), 5.0, 5.0)
-        painter.setPen(QPen(Qt.GlobalColor.white, 1))
-        painter.drawEllipse(QPointF(px, py), 4.0, 4.0)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(Qt.GlobalColor.black, 2))
+            painter.drawEllipse(QPointF(px, py), 5.0, 5.0)
+            painter.setPen(QPen(Qt.GlobalColor.white, 1))
+            painter.drawEllipse(QPointF(px, py), 4.0, 4.0)
 
     def _update_color_from_mouse(self, pos: QPointF) -> None:
         rect = self.rect()

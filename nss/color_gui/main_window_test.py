@@ -101,7 +101,8 @@ def test_explore_mode_randomize_locks_center() -> None:
     window.sh_zone.sat_slider.setValue(15)
     
     # Enable Explore Mode
-    window.explore_checkbox.setChecked(True)
+    with patch('nss.color_gui.main_window.GradingWorker.start') as mock_start:
+        window.explore_checkbox.setChecked(True)
     
     # Read the established center state
     snapshot = window.state_manager.capture_snapshot()
@@ -157,10 +158,6 @@ def test_slider_label_updates_value_flow() -> None:
 
     window.master_zone.balance_slider.setValue(-45)
     assert window.master_zone.balance_lbl.text() == "Balance: -0.45"
-
-    # --- Intensity Slider ---
-    window.intensity_slider.setValue(85)
-    assert window.intensity_label.text() == " Intensity: 0.85x "
 
 
 def test_global_rotation_behavior() -> None:
@@ -265,6 +262,117 @@ def test_zone_hue_sliders_and_rotation_interaction() -> None:
     assert window.mid_zone.hue_lbl.text() == "Hue: 10°"
     assert window.mid_zone.wheel.hue == 350.0
     assert window.mid_zone.wheel.rotation_offset == 20.0
+
+
+def test_explore_mode_click_halves_variation_strength() -> None:
+    import numpy as np
+    from unittest.mock import patch
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    # Use non-square dummy images as per guidelines
+    dummy_img = np.zeros((15, 12, 3), dtype=np.float32)
+    window.master_image = dummy_img
+    window.proxy_image = dummy_img
+
+    # Initialize a baseline grid states to simulate click drill-down
+    with patch('nss.color_gui.main_window.GradingWorker.start') as mock_start:
+        window.explore_checkbox.setChecked(True)
+    assert window.grid_states is not None
+    assert len(window.grid_states) == 9
+
+    # Set variation slider to 80 (represents 0.8 strength)
+    window.explore_widget.var_slider.setValue(80)
+    assert window.explore_widget.var_slider.value() == 80
+    assert window.explore_widget.variation_strength == 0.8
+
+    # Simulate left-click on an outer slot (container 0)
+    with patch('nss.color_gui.main_window.GradingWorker.start') as mock_start:
+        window.on_explore_container_clicked(0)
+
+    # Slider value must be programmatically cut in half (from 80 to 40)
+    assert window.explore_widget.var_slider.value() == 40
+    assert window.explore_widget.variation_strength == 0.4
+
+
+def test_multiview_tone_toggle_and_wheel_rendering() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    # 1. Default show_all_tones should be False
+    assert window.show_all_tones is False
+    assert window.tabs.currentIndex() == 0  # Shadows is active by default
+
+    # 2. Re-clicking the already active tab (index 0) should toggle show_all_tones to True
+    window.on_tab_bar_clicked(0)
+    assert window.show_all_tones is True
+
+    # 3. Re-clicking it again should toggle show_all_tones back to False
+    window.on_tab_bar_clicked(0)
+    assert window.show_all_tones is False
+
+    # 4. Toggle back to True and set specific, non-zero values for all three zones
+    window.on_tab_bar_clicked(0)
+    assert window.show_all_tones is True
+
+    window.sh_zone.hue_slider.setValue(145)
+    window.sh_zone.sat_slider.setValue(25)  # 0.25 sat
+
+    window.mid_zone.hue_slider.setValue(210)
+    window.mid_zone.sat_slider.setValue(55)  # 0.55 sat
+
+    window.hi_zone.hue_slider.setValue(70)
+    window.hi_zone.sat_slider.setValue(85)  # 0.85 sat
+
+    # Set global Rotation slider to +30 degrees
+    window.master_zone.rotation_slider.setValue(30)
+
+    # Trigger real-time callback
+    window.on_manual_slider_changed()
+
+    # Verify that the active Shadows wheel gets show_all_tones = True and all_tones_data
+    assert window.sh_zone.wheel.show_all_tones is True
+    assert window.sh_zone.wheel.rotation_offset == 30.0
+    
+    # Verify that the inactive wheels have show_all_tones = False
+    assert window.mid_zone.wheel.show_all_tones is False
+    assert window.hi_zone.wheel.show_all_tones is False
+
+    # Verify that all_tones_data contains exact non-zero base hues and saturations
+    assert window.sh_zone.wheel.all_tones_data['S'] == (145.0, 0.25)
+    assert window.sh_zone.wheel.all_tones_data['M'] == (210.0, 0.55)
+    assert window.sh_zone.wheel.all_tones_data['H'] == (70.0, 0.85)
+
+    # Double check that effective hues compute correctly
+    # Shadows: (145.0 + 30.0) % 360.0 = 175.0
+    # Midtones: (210.0 + 30.0) % 360.0 = 240.0
+    # Highlights: (70.0 + 30.0) % 360.0 = 100.0
+    sh_eff = (window.sh_zone.wheel.all_tones_data['S'][0] + window.sh_zone.wheel.rotation_offset) % 360.0
+    mid_eff = (window.sh_zone.wheel.all_tones_data['M'][0] + window.sh_zone.wheel.rotation_offset) % 360.0
+    hi_eff = (window.sh_zone.wheel.all_tones_data['H'][0] + window.sh_zone.wheel.rotation_offset) % 360.0
+
+    assert sh_eff == 175.0
+    assert mid_eff == 240.0
+    assert hi_eff == 100.0
+
+    # 5. Switching tabs (e.g. to Midtones tab at index 1) must PRESERVE the show_all_tones state!
+    # Simulate tab switch to Midtones
+    window.tabs.setCurrentIndex(1)
+    
+    # State must still be True
+    assert window.show_all_tones is True
+    
+    # Midtones wheel (now active) should have show_all_tones = True
+    assert window.mid_zone.wheel.show_all_tones is True
+    assert window.sh_zone.wheel.show_all_tones is False
+    assert window.hi_zone.wheel.show_all_tones is False
+    
+    # Clicking the already active Midtones tab (index 1) should toggle it back to False
+    window.on_tab_bar_clicked(1)
+    assert window.show_all_tones is False
+    assert window.mid_zone.wheel.show_all_tones is False
+
+
 
 
 

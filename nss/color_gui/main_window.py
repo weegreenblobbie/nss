@@ -428,21 +428,6 @@ class MainWindow(QMainWindow):
         self.forward_action.triggered.connect(self.on_redo_clicked)
         toolbar.addAction(self.forward_action)
 
-        toolbar.addSeparator()
-
-        # Intensity Label
-        self.intensity_label = QLabel(" Intensity: 0.20x ")
-        self.intensity_label.setStyleSheet("font-weight: bold;")
-        toolbar.addWidget(self.intensity_label)
-
-        self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.intensity_slider.setRange(10, 200)
-        self.intensity_slider.setValue(20)
-        self.intensity_slider.setFixedWidth(120)
-        self.intensity_slider.valueChanged.connect(self.on_intensity_changed)
-        self.intensity_slider.sliderReleased.connect(self.on_discrete_action)
-        toolbar.addWidget(self.intensity_slider)
-
         # 2. Central Widget Layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -463,6 +448,8 @@ class MainWindow(QMainWindow):
         self.explore_widget = ExploreWidget(self)
         self.explore_widget.container_clicked.connect(self.on_explore_container_clicked)
         self.explore_widget.container_edit_requested.connect(self.on_explore_edit_requested)
+        self.explore_widget.variation_changed.connect(self.on_explore_variation_changed)
+        self.explore_widget.var_slider.sliderReleased.connect(self.on_discrete_action)
         self.view_stack.addWidget(self.explore_widget)
 
         # Right Side: Manual Grading & Harmony Randomizer Dock
@@ -508,10 +495,16 @@ class MainWindow(QMainWindow):
         self.randomize_btn.clicked.connect(self.on_randomize_clicked)
         harmony_layout.addWidget(self.randomize_btn)
 
+        # Variation Strength Slider positioned below Generate button
+        harmony_layout.addWidget(self.explore_widget.var_label)
+        harmony_layout.addWidget(self.explore_widget.var_slider)
+
         inspector_layout.addWidget(harmony_box)
 
         # Manual 3-Way Tabs Setup
         self.tabs = QTabWidget()
+        self.tabs.tabBarClicked.connect(self.on_tab_bar_clicked)
+        self.show_all_tones = False
         inspector_layout.addWidget(self.tabs)
 
         # Stateful tab widgets
@@ -546,6 +539,7 @@ class MainWindow(QMainWindow):
         inspector_layout.addWidget(self.master_zone)
         inspector_layout.addStretch()
 
+        self.tabs.currentChanged.connect(self.on_manual_slider_changed)
         self.statusBar().showMessage("Ready. Load a 16-bit TIFF image to begin.")
 
     # ----------------------------------------------------
@@ -557,8 +551,8 @@ class MainWindow(QMainWindow):
         """
         snapshot = self.state_manager.capture_snapshot()
         
-        # Verify step size slider value
-        snapshot["step_size"] = self.intensity_slider.value() / 100.0
+        # Keep a constant step size default for backwards compat
+        snapshot["step_size"] = 0.2
         
         # Avoid duplicate pushes
         if self.state_manager.undo_stack and self.state_manager.undo_stack[-1] == snapshot:
@@ -576,12 +570,6 @@ class MainWindow(QMainWindow):
             if snapshot:
                 self.state_manager.restore_snapshot(snapshot)
                 
-                # Sync step size slider
-                self.intensity_slider.blockSignals(True)
-                self.intensity_slider.setValue(int(snapshot.get("step_size", 0.2) * 100.0))
-                self.intensity_label.setText(f" Intensity: {snapshot.get('step_size', 0.2):.2f}x ")
-                self.intensity_slider.blockSignals(False)
-                
                 self.render_view_from_memento(snapshot)
                 self.update_memento_navigation_ui()
                 self.statusBar().showMessage("Undo performed.")
@@ -591,12 +579,6 @@ class MainWindow(QMainWindow):
             snapshot = self.state_manager.redo()
             if snapshot:
                 self.state_manager.restore_snapshot(snapshot)
-                
-                # Sync step size slider
-                self.intensity_slider.blockSignals(True)
-                self.intensity_slider.setValue(int(snapshot.get("step_size", 0.2) * 100.0))
-                self.intensity_label.setText(f" Intensity: {snapshot.get('step_size', 0.2):.2f}x ")
-                self.intensity_slider.blockSignals(False)
                 
                 self.render_view_from_memento(snapshot)
                 self.update_memento_navigation_ui()
@@ -789,12 +771,21 @@ class MainWindow(QMainWindow):
             
         # Left click outer: make center baseline, shrink Variation Strength, update Memento
         chosen_state = self.grid_states[index]
-        self.explore_widget.variation_strength *= 0.5  # ShrinkVariation Strength for tighter drill down
+        
+        # Halve the slider's integer value programmatically
+        current_val = self.explore_widget.var_slider.value()
+        self.explore_widget.variation_strength = (current_val // 2) / 100.0
         
         # Promote & Capture
         self.apply_state_node_to_widgets(chosen_state)
         self.on_discrete_action()
         self.statusBar().showMessage(f"Promoted mutation {index} to center baseline. Tightening variation range...")
+
+    def on_explore_variation_changed(self, value: float) -> None:
+        if self.explore_checkbox.isChecked():
+            snapshot = self.state_manager.capture_snapshot()
+            center_state = self.rebuild_state_node_from_memento(snapshot)
+            self.start_explore_mutations_render(center_state)
 
     def on_explore_edit_requested(self, index: int) -> None:
         """
@@ -818,6 +809,11 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------
     # Manual Sliders & Color Wheels Callbacks
     # ----------------------------------------------------
+    def on_tab_bar_clicked(self, index: int) -> None:
+        if index == self.tabs.currentIndex():
+            self.show_all_tones = not self.show_all_tones
+            self.on_manual_slider_changed()
+
     def on_manual_slider_changed(self) -> None:
         """
         Triggered when manual sliders or wheels values are dragged/shifted in real-time.
@@ -861,6 +857,19 @@ class MainWindow(QMainWindow):
         self.sh_zone.wheel.hue = state["shadow_hue"]
         self.mid_zone.wheel.hue = state["midtone_hue"]
         self.hi_zone.wheel.hue = state["highlight_hue"]
+
+        # Update multi-view tone data for the wheels in real-time
+        active_idx = self.tabs.currentIndex()
+        for idx, zone in enumerate([self.sh_zone, self.mid_zone, self.hi_zone]):
+            zone.wheel.show_all_tones = (self.show_all_tones and idx == active_idx)
+            if zone.wheel.show_all_tones:
+                zone.wheel.all_tones_data = {
+                    'S': (state["shadow_hue"], state["shadow_sat"]),
+                    'M': (state["midtone_hue"], state["midtone_sat"]),
+                    'H': (state["highlight_hue"], state["highlight_sat"])
+                }
+            else:
+                zone.wheel.all_tones_data = {}
         
         self.sh_zone.wheel.update()
         self.mid_zone.wheel.update()
@@ -924,16 +933,6 @@ class MainWindow(QMainWindow):
     def reset_slider(self, slider: QSlider, value: int) -> None:
         slider.setValue(value)
         self.on_discrete_action()
-
-    def on_intensity_changed(self, value: int) -> None:
-        step_size = value / 100.0
-        self.intensity_label.setText(f" Intensity: {step_size:.2f}x ")
-        
-        if self.master_image is None:
-            return
-            
-        snapshot = self.state_manager.capture_snapshot()
-        self.render_view_from_memento(snapshot)
 
     # ----------------------------------------------------
     # File I/O MRU

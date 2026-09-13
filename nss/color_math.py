@@ -446,8 +446,9 @@ def generate_explore_mutations(center: StateNode, mode: str, variation_strength:
     def j(variance: float) -> float:
         return random.uniform(-variance, variance)
         
-    hue_var = 15.0 * variation_strength
-    sat_light_var = 0.20 * variation_strength
+    # Scale bounds linearly: 100% (1.0) maps to max hue delta of 45.0 and sat delta of 0.25
+    hue_var = 45.0 * variation_strength
+    sat_light_var = 0.25 * variation_strength
     
     for i in range(9):
         if i == 4:
