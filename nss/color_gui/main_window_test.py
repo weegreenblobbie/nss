@@ -373,6 +373,42 @@ def test_multiview_tone_toggle_and_wheel_rendering() -> None:
     assert window.mid_zone.wheel.show_all_tones is False
 
 
+def test_layout_fixes() -> None:
+    from PyQt6.QtWidgets import QScrollArea, QToolButton
+    from PyQt6.QtCore import Qt
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    # 1. Verify QScrollArea integration
+    scroll_areas = window.findChildren(QScrollArea)
+    assert len(scroll_areas) == 1
+    sa = scroll_areas[0]
+    
+    # Check that scroll_area wraps the inspector_panel
+    assert sa.widget() is window.inspector_panel
+    assert sa.widgetResizable() is True
+    assert sa.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+    # 2. Verify Undo/Redo corner widget integration
+    menu_bar = window.menuBar()
+    corner_widget = menu_bar.cornerWidget(Qt.Corner.TopRightCorner)
+    assert corner_widget is not None
+    
+    # Check that back_btn and forward_btn are children of the corner widget
+    assert window.back_btn.parent() is corner_widget
+    assert window.forward_btn.parent() is corner_widget
+    assert window.history_label.parent() is corner_widget
+    
+    # Check they are QToolButtons
+    assert isinstance(window.back_btn, QToolButton)
+    assert isinstance(window.forward_btn, QToolButton)
+    
+    # Verify their actions remain fully functional
+    assert window.back_btn.defaultAction() is window.back_action
+    assert window.forward_btn.defaultAction() is window.forward_action
+
+
+
 
 
 

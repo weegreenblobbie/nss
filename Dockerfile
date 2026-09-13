@@ -7,8 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 \
     libdbus-1-3 \
     libfontconfig1 \
-    xvfb \
+    libxrender1 \
+    libglib2.0-0 \
     libglib2.0-0t64 \
+    libxkbcommon-x11-0 \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Git and Node.js (for Gemini CLI)

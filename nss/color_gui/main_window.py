@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QStackedWidget,
     QGroupBox,
+    QScrollArea,
+    QToolButton,
 )
 from PyQt6.QtGui import (
     QMouseEvent,
@@ -405,28 +407,38 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 1. Create Toolbar with Back/Forward Undo/Redo & Intensity slider
-        toolbar = QToolBar("Navigation and Controls")
-        self.addToolBar(toolbar)
-
-        # Memento Undo/Redo Controls
+        # Memento Undo/Redo Controls as Actions (for shortcuts & tracking)
         self.back_action = QAction("Back (Undo)", self)
         self.back_action.setShortcut("Ctrl+Z")
         self.back_action.setEnabled(False)
         self.back_action.triggered.connect(self.on_undo_clicked)
-        toolbar.addAction(self.back_action)
-
-        self.history_label = QLabel("Step: 0 of 0")
-        self.history_label.setStyleSheet(
-            "font-weight: bold; margin-left: 10px; margin-right: 10px;"
-        )
-        toolbar.addWidget(self.history_label)
 
         self.forward_action = QAction("Forward (Redo)", self)
         self.forward_action.setShortcut("Ctrl+Y")
         self.forward_action.setEnabled(False)
         self.forward_action.triggered.connect(self.on_redo_clicked)
-        toolbar.addAction(self.forward_action)
+
+        # Create container for MenuBar corner widget
+        corner_widget = QWidget()
+        corner_layout = QHBoxLayout(corner_widget)
+        corner_layout.setContentsMargins(0, 0, 10, 0)
+        corner_layout.setSpacing(5)
+
+        self.back_btn = QToolButton(self)
+        self.back_btn.setDefaultAction(self.back_action)
+        corner_layout.addWidget(self.back_btn)
+
+        self.history_label = QLabel("Step: 0 of 0")
+        self.history_label.setStyleSheet(
+            "font-weight: bold; margin-left: 10px; margin-right: 10px;"
+        )
+        corner_layout.addWidget(self.history_label)
+
+        self.forward_btn = QToolButton(self)
+        self.forward_btn.setDefaultAction(self.forward_action)
+        corner_layout.addWidget(self.forward_btn)
+
+        menu_bar.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
 
         # 2. Central Widget Layout
         central_widget = QWidget()
@@ -452,18 +464,25 @@ class MainWindow(QMainWindow):
         self.explore_widget.var_slider.sliderReleased.connect(self.on_discrete_action)
         self.view_stack.addWidget(self.explore_widget)
 
-        # Right Side: Manual Grading & Harmony Randomizer Dock
+        # Right Side: Manual Grading & Harmony Randomizer Scroll Area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setFixedWidth(300)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
         self.inspector_panel = QFrame()
         self.inspector_panel.setFrameShape(QFrame.Shape.StyledPanel)
         self.inspector_panel.setFrameShadow(QFrame.Shadow.Raised)
-        self.inspector_panel.setFixedWidth(300)
         self.inspector_panel.setStyleSheet(
             "border: 1px solid #cccccc; border-radius: 4px;"
         )
         inspector_layout = QVBoxLayout(self.inspector_panel)
         inspector_layout.setContentsMargins(15, 15, 15, 15)
         inspector_layout.setSpacing(12)
-        main_layout.addWidget(self.inspector_panel, stretch=1)
+        scroll_area.setWidget(self.inspector_panel)
+
+        main_layout.addWidget(scroll_area, stretch=1)
 
         # Harmony Randomizer / Explore Mode Section
         harmony_box = QGroupBox("EXPLORE & HARMONY")
