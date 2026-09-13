@@ -59,7 +59,7 @@ def test_mutation_generators() -> None:
 
 def test_apply_grading_basic() -> None:
     # A simple red float32 pixel (R=1.0, G=0.0, B=0.0)
-    img = np.zeros((10, 10, 3), dtype=np.float32)
+    img = np.zeros((15, 12, 3), dtype=np.float32)
     img[:, :, 0] = 1.0  # Pure Red
     
     # Apply standard empty shift
@@ -75,12 +75,12 @@ def test_luminosity_masks_complementary() -> None:
     # Create an image with saturated colors to preserve hue:
     # Left half: dark saturated red shadows (R=0.1, G=0.0, B=0.0 => L=0.05 < 0.3, Sat=1.0)
     # Right half: bright saturated red/yellow highlights (R=0.9, G=0.8, B=0.8 => L=0.85 > 0.7, Sat=0.33)
-    img = np.zeros((10, 10, 3), dtype=np.float32)
-    img[:, :5, 0] = 0.1  # Shadows
+    img = np.zeros((15, 12, 3), dtype=np.float32)
+    img[:, :6, 0] = 0.1  # Shadows
     
-    img[:, 5:, 0] = 0.9  # Highlights
-    img[:, 5:, 1] = 0.8
-    img[:, 5:, 2] = 0.8
+    img[:, 6:, 0] = 0.9  # Highlights
+    img[:, 6:, 1] = 0.8
+    img[:, 6:, 2] = 0.8
     
     state = create_default_state("Complementary")
     state["highlight_hue"] = 120.0  # Green highlights, shadow hue = 120+180 = 300
@@ -93,9 +93,9 @@ def test_luminosity_masks_complementary() -> None:
     
     # Left half (Shadows) should have shadow hue (120 + 180) = 300
     # Allow small tolerance due to float32 precision and color space rounding
-    assert np.all(np.isclose(H[:, :5], 300.0, atol=3.0))
+    assert np.all(np.isclose(H[:, :6], 300.0, atol=3.0))
     # Right half (Highlights) should have highlight hue = 120
-    assert np.all(np.isclose(H[:, 5:], 120.0, atol=3.0))
+    assert np.all(np.isclose(H[:, 6:], 120.0, atol=3.0))
 
 def test_mutation_axes() -> None:
     center = create_default_state("Monochromatic")

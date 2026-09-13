@@ -66,15 +66,19 @@ def test_manual_slider_changed_no_crash() -> None:
     app = QApplication.instance() or QApplication([])
     
     window = MainWindow()
-    # Set dummy images so on_manual_slider_changed doesn't return early
-    dummy_img = np.zeros((10, 10, 3), dtype=np.float32)
+    # Set non-square dummy images so on_manual_slider_changed doesn't return early
+    dummy_img = np.zeros((15, 12, 3), dtype=np.float32)
     window.master_image = dummy_img
     window.proxy_image = dummy_img
+    
+    # Set non-zero, distinct values to verify they flow correctly through the logic
+    window.sh_zone.wheel.set_color(120.5, 0.15)
+    window.sh_zone.sat_slider.setValue(15)
     
     # Simulate trigger of manual slider change
     window.on_manual_slider_changed()
     
     # Ensure swatch_lbl received the values and set values on it correctly
-    assert window.sh_zone.swatch_lbl.hue == 0.0
-    assert window.sh_zone.swatch_lbl.sat == 0.0
+    assert window.sh_zone.swatch_lbl.hue == 120.5
+    assert window.sh_zone.swatch_lbl.sat == 0.15
 
