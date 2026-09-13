@@ -29,3 +29,4 @@ Before running any tests, linting, or python scripts, you MUST ensure the Python
 3. Ensure dependencies are installed: `ai-venv\Scripts\python -m pip install -r requirements.txt` (or inside the container: `pip install -r requirements.txt`).
 4. Always run tests using the venv's python or pytest.
 5. You need to run pytest in "headless" mode via: `xvfb-run pytest`
+
