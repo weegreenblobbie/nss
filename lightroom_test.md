@@ -32,7 +32,7 @@ Export the test image from Lightroom with the following specific settings applie
   * reference_color_grading_input.tiff (original generated input image)
   * case_1_shadows.tif
   * case_1_midtones.tif
-  * case_2_highlights.tif
+  * case_1_highlights.tif
 
 ### Test Case 2: Saturation Linearity (The Bug Check)
 * **Goal:** Validate that our recent saturation fix scales exactly like a commercial engine.

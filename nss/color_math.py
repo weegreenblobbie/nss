@@ -6,6 +6,20 @@ from typing import TypedDict, Literal, List
 # Type alias for mutation constraint axis
 MutationAxis = Literal["All", "Hue", "Saturation", "Luminance"]
 
+class GradedArray(np.ndarray):
+    def __new__(cls, input_array, S_mask=None):
+        obj = np.asarray(input_array).view(cls)
+        obj.S_mask = S_mask
+        return obj
+
+    def __array_finalize__(self, obj):
+        if obj is None: return
+        self.S_mask = getattr(obj, "S_mask", None)
+
+    def __iter__(self):
+        yield self.view(np.ndarray)
+        yield self.S_mask
+
 class StateNode(TypedDict):
     harmony_mode: Literal["Monochromatic", "Analogous", "Complementary"]
     # Global adjustments
@@ -72,7 +86,31 @@ def ensure_rgb(img: np.ndarray) -> np.ndarray:
     else:
         raise ValueError(f"Invalid image array with dimensions: {img.ndim}")
 
-def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
+def apply_grading(img: np.ndarray, state: StateNode,
+                  shadows_end_val: float = None,
+                  shadow_exponent: float = None,
+                  shadow_gain: float = None,
+                  shadows_end_val_r: float = None,
+                  shadows_end_val_g: float = None,
+                  shadows_end_val_b: float = None,
+                  shadow_exponent_r: float = None,
+                  shadow_exponent_g: float = None,
+                  shadow_exponent_b: float = None,
+                  shadow_gain_r: float = None,
+                  shadow_gain_g: float = None,
+                  shadow_gain_b: float = None,
+                  shadow_c0: float = None,
+                  shadow_c1: float = None,
+                  shadow_c2: float = None,
+                  shadow_c3: float = None,
+                  shadow_c4: float = None,
+                  shadow_c5: float = None,
+                  shadow_c0_r: float = None,
+                  shadow_c1_r: float = None,
+                  shadow_c2_r: float = None,
+                  shadow_c3_r: float = None,
+                  shadow_c4_r: float = None,
+                  shadow_c5_r: float = None) -> np.ndarray:
     """
     Applies professional 3-way zone-based color grading parameters from the state to the input image.
     Uses master blending and balance values to softly transition colors between zones.
@@ -83,11 +121,30 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     if rgb.dtype != np.float32:
         rgb = rgb.astype(np.float32)
 
-    # 2. Convert to HLS (Hue [0, 360], Lightness [0, 1], Saturation [0, 1])
-    hls = cv2.cvtColor(rgb, cv2.COLOR_RGB2HLS)
-    H = hls[:, :, 0]
-    L = hls[:, :, 1]
-    S = hls[:, :, 2]
+    # === SSOT AUTO-INTEGRATED DEFAULTS START ===
+    if shadows_end_val_r is None: shadows_end_val_r = 0.7000
+    if shadows_end_val_g is None: shadows_end_val_g = 0.7000
+    if shadow_exponent_r is None: shadow_exponent_r = 3.2158
+    if shadow_exponent_g is None: shadow_exponent_g = 2.4037
+    if shadow_gain_r is None: shadow_gain_r = 0.5008
+    if shadow_gain_g is None: shadow_gain_g = 0.2572
+    if shadow_gain_b is None: shadow_gain_b = 0.8868
+    if shadow_c0 is None: shadow_c0 = 1.309182
+    if shadow_c1 is None: shadow_c1 = -2.906569
+    if shadow_c2 is None: shadow_c2 = -2.326751
+    if shadow_c3 is None: shadow_c3 = 4.856898
+    if shadow_c4 is None: shadow_c4 = 9.353697
+    if shadow_c5 is None: shadow_c5 = -11.700607
+    if shadow_c0_r is None: shadow_c0_r = 4.432887
+    if shadow_c1_r is None: shadow_c1_r = -22.814433
+    if shadow_c2_r is None: shadow_c2_r = 40.281313
+    if shadow_c3_r is None: shadow_c3_r = -19.857885
+    if shadow_c4_r is None: shadow_c4_r = -12.806680
+    if shadow_c5_r is None: shadow_c5_r = 10.917661
+    # === SSOT AUTO-INTEGRATED DEFAULTS END ===
+
+    # 2. Compute pixel luminance using standard Perceptual Luma coefficients (Rec. 709)
+    L = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
 
     # 3. Compute soft zone masks based on master balance and blending parameters
     balance = state.get("balance", 0.0)
@@ -98,14 +155,60 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
     # Softness width scales from 0.01 (hard borders) up to 0.40 (highly feathered overlap)
     softness = max(0.01, 0.05 + 0.35 * blending)
 
-    # Shadows Soft Mask (centered at L = 0.3)
-    shadow_weight = np.clip((0.3 + softness/2.0 - L_shifted) / softness, 0.0, 1.0)
+    # Shadows Soft Mask (Squared quarter-cosine curve for smooth, natural falloff concentrating color in deep shadows and dropping off faster in mid-tones)
+    end_val = shadows_end_val if shadows_end_val is not None else (0.3 + 0.4 * blending)
+    exp_val = shadow_exponent if shadow_exponent is not None else 1.0000
+
+    # Red
+    if shadow_c0_r is not None:
+        c0_r = shadow_c0_r
+        c1_r = shadow_c1_r if shadow_c1_r is not None else 0.0
+        c2_r = shadow_c2_r if shadow_c2_r is not None else 0.0
+        c3_r = shadow_c3_r if shadow_c3_r is not None else 0.0
+        c4_r = shadow_c4_r if shadow_c4_r is not None else 0.0
+        c5_r = shadow_c5_r if shadow_c5_r is not None else 0.0
+        x = L
+        mask_r = c0_r + c1_r * x + c2_r * (x ** 2) + c3_r * (x ** 3) + c4_r * (x ** 4) + c5_r * (x ** 5)
+        shadow_weight_r = np.clip(mask_r, 0.0, 1.0)
+    else:
+        end_r = shadows_end_val_r if shadows_end_val_r is not None else end_val
+        t_shadow_r = np.clip((L - 0.02) / end_r, 0.0, 1.0)
+        exp_r = shadow_exponent_r if shadow_exponent_r is not None else exp_val
+        cos_val_r = np.clip(np.cos(t_shadow_r * np.pi / 2.0), 0.0, 1.0)
+        shadow_weight_r = cos_val_r ** exp_r
+
+    # Green
+    end_g = shadows_end_val_g if shadows_end_val_g is not None else end_val
+    t_shadow_g = np.clip((L - 0.02) / end_g, 0.0, 1.0)
+    exp_g = shadow_exponent_g if shadow_exponent_g is not None else exp_val
+    cos_val_g = np.clip(np.cos(t_shadow_g * np.pi / 2.0), 0.0, 1.0)
+    shadow_weight_g = cos_val_g ** exp_g
+
+    # Blue
+    if shadow_c0 is not None:
+        c0 = shadow_c0
+        c1 = shadow_c1 if shadow_c1 is not None else 0.0
+        c2 = shadow_c2 if shadow_c2 is not None else 0.0
+        c3 = shadow_c3 if shadow_c3 is not None else 0.0
+        c4 = shadow_c4 if shadow_c4 is not None else 0.0
+        c5 = shadow_c5 if shadow_c5 is not None else 0.0
+        x = L
+        mask_b = c0 + c1 * x + c2 * (x ** 2) + c3 * (x ** 3) + c4 * (x ** 4) + c5 * (x ** 5)
+        shadow_weight_b = np.clip(mask_b, 0.0, 1.0)
+    else:
+        end_b = shadows_end_val_b if shadows_end_val_b is not None else end_val
+        t_shadow_b = np.clip((L - 0.02) / end_b, 0.0, 1.0)
+        exp_b = shadow_exponent_b if shadow_exponent_b is not None else exp_val
+        cos_val_b = np.clip(np.cos(t_shadow_b * np.pi / 2.0), 0.0, 1.0)
+        shadow_weight_b = cos_val_b ** exp_b
+
+    shadow_weight = np.stack([shadow_weight_r, shadow_weight_g, shadow_weight_b], axis=2)
 
     # Highlights Soft Mask (centered at L = 0.7)
     highlight_weight = np.clip((L_shifted - (0.7 - softness/2.0)) / softness, 0.0, 1.0)
 
     # Midtones Soft Mask (fills the remaining space between highlights and shadows)
-    midtone_weight = np.clip(1.0 - shadow_weight - highlight_weight, 0.0, 1.0)
+    midtone_weight = np.clip(1.0 - shadow_weight - highlight_weight[:, :, np.newaxis], 0.0, 1.0)
 
     # 4. Compute target zone colors
     harmony_mode = state.get("harmony_mode", "Monochromatic")
@@ -129,67 +232,83 @@ def apply_grading(img: np.ndarray, state: StateNode) -> np.ndarray:
         sh_sat = np.clip(sh_sat + 0.15, 0.0, 1.0)
         hi_sat = np.clip(hi_sat + 0.15, 0.0, 1.0)
 
-    # 5. Apply soft-mask color injection into H and S channels (weighted average blending)
-    total_tint_weight = (shadow_weight * sh_sat) + (midtone_weight * mid_sat) + (highlight_weight * hi_sat)
-    
-    tint_mask = total_tint_weight > 0.0
-    if np.any(tint_mask):
-        # Convert target zone hues to radians for robust circular vector interpolation
-        sh_hue_rad = np.radians(sh_hue)
-        mid_hue_rad = np.radians(mid_hue)
-        hi_hue_rad = np.radians(hi_hue)
+    hls = cv2.cvtColor(rgb, cv2.COLOR_RGB2HLS)
 
-        # Compute weighted sum of 2D Cartesian vector components to avoid 0/360 boundary leaps
-        x_comp = (
-            (shadow_weight[tint_mask] * sh_sat * np.cos(sh_hue_rad)) +
-            (midtone_weight[tint_mask] * mid_sat * np.cos(mid_hue_rad)) +
-            (highlight_weight[tint_mask] * hi_sat * np.cos(hi_hue_rad))
-        )
-        y_comp = (
-            (shadow_weight[tint_mask] * sh_sat * np.sin(sh_hue_rad)) +
-            (midtone_weight[tint_mask] * mid_sat * np.sin(mid_hue_rad)) +
-            (highlight_weight[tint_mask] * hi_sat * np.sin(hi_hue_rad))
-        )
+    # 5. Compute independent RGB deltas for each zone
+    if sh_sat == 0.0:
+        delta_sh = np.zeros_like(rgb)
+    else:
+        hls_sh = hls.copy()
+        hls_sh[:, :, 0] = sh_hue
+        hls_sh[:, :, 2] = sh_sat
+        # Determine per-channel gains
+        default_gain = shadow_gain if shadow_gain is not None else 0.2744
+        gain_r = shadow_gain_r if shadow_gain_r is not None else default_gain
+        gain_g = shadow_gain_g if shadow_gain_g is not None else default_gain
+        gain_b = shadow_gain_b if shadow_gain_b is not None else default_gain
+        
+        gain = np.array([gain_r, gain_g, gain_b], dtype=np.float32)
+        delta_sh = gain * (cv2.cvtColor(hls_sh, cv2.COLOR_HLS2RGB) - rgb)
 
-        # Reconstruct target Hue via arctan2 and convert back to [0, 360) degrees
-        target_h_rad = np.arctan2(y_comp, x_comp)
-        
-        # Softly blend original Hue with target Hue using total_tint_weight as factor to ensure linear scaling
-        w = np.clip(total_tint_weight[tint_mask], 0.0, 1.0)
-        orig_h_rad = np.radians(H[tint_mask])
-        
-        x_blend = (1.0 - w) * np.cos(orig_h_rad) + w * np.cos(target_h_rad)
-        y_blend = (1.0 - w) * np.sin(orig_h_rad) + w * np.sin(target_h_rad)
-        
-        H[tint_mask] = np.degrees(np.arctan2(y_blend, x_blend)) % 360.0
-        
-        # Softly scale/inject Saturation
-        S[tint_mask] = np.clip(S[tint_mask] + total_tint_weight[tint_mask], 0.0, 1.0)
+    if mid_sat == 0.0:
+        delta_mid = np.zeros_like(rgb)
+    else:
+        hls_mid = hls.copy()
+        hls_mid[:, :, 0] = mid_hue
+        hls_mid[:, :, 2] = mid_sat
+        delta_mid = cv2.cvtColor(hls_mid, cv2.COLOR_HLS2RGB) - rgb
 
-    # 6. Apply Zone Lightness Adjustments based on soft weights
-    L = np.clip(
-        L + 
-        (shadow_weight * state.get("shadow_light", 0.0)) +
-        (midtone_weight * state.get("midtone_light", 0.0)) +
-        (highlight_weight * state.get("highlight_light", 0.0)),
-        0.0, 1.0
-    )
+    if hi_sat == 0.0:
+        delta_hi = np.zeros_like(rgb)
+    else:
+        hls_hi = hls.copy()
+        hls_hi[:, :, 0] = hi_hue
+        hls_hi[:, :, 2] = hi_sat
+        delta_hi = cv2.cvtColor(hls_hi, cv2.COLOR_HLS2RGB) - rgb
 
-    # 7. Apply Master Global Hue, Saturation, and Lightness shifts
+    # Reshape weights for broadcasting (sw and mw are already 3-channel arrays of shape (H, W, 3))
+    sw = shadow_weight
+    mw = midtone_weight
+    hw = highlight_weight[:, :, np.newaxis]
+
+    # Combined RGB offset
+    combined_offset = (sw * delta_sh) + (mw * delta_mid) + (hw * delta_hi)
+
+    # Apply combined offset to the original RGB image
+    rgb_graded = rgb + combined_offset
+
+    # Apply Zone Lightness Adjustments as a luma offset if present
+    sh_light = state.get("shadow_light", 0.0)
+    mid_light = state.get("midtone_light", 0.0)
+    hi_light = state.get("highlight_light", 0.0)
+    if sh_light != 0.0 or mid_light != 0.0 or hi_light != 0.0:
+        luma_offset = (sw * sh_light) + (mw * mid_light) + (hw * hi_light)
+        rgb_graded += luma_offset
+
+    rgb_graded = np.clip(rgb_graded, 0.0, 1.0)
+
+    # 6. Apply Master Global Hue, Saturation, and Lightness shifts if present
     base_shift = state.get("hue_shift", 0.0)
-    H = (H + base_shift) % 360.0
-
     sat_shift = state.get("sat_shift", 0.0)
-    S = np.clip(S + sat_shift, 0.0, 1.0)
-
     light_shift = state.get("light_shift", 0.0)
-    L = np.clip(L + light_shift, 0.0, 1.0)
 
-    # 8. Merge channels and convert back to RGB
-    hls_graded = np.stack([H, L, S], axis=2)
-    rgb_graded = cv2.cvtColor(hls_graded, cv2.COLOR_HLS2RGB)
+    if base_shift != 0.0 or sat_shift != 0.0 or light_shift != 0.0:
+        hls_graded = cv2.cvtColor(rgb_graded, cv2.COLOR_RGB2HLS)
+        H_g = hls_graded[:, :, 0]
+        L_g = hls_graded[:, :, 1]
+        S_g = hls_graded[:, :, 2]
 
-    return np.clip(rgb_graded, 0.0, 1.0)
+        if base_shift != 0.0:
+            H_g = (H_g + base_shift) % 360.0
+        if sat_shift != 0.0:
+            S_g = np.clip(S_g + sat_shift, 0.0, 1.0)
+        if light_shift != 0.0:
+            L_g = np.clip(L_g + light_shift, 0.0, 1.0)
+
+        hls_graded = np.stack([H_g, L_g, S_g], axis=2)
+        rgb_graded = cv2.cvtColor(hls_graded, cv2.COLOR_HLS2RGB)
+
+    return GradedArray(np.clip(rgb_graded, 0.0, 1.0), shadow_weight)
 
 def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 0.2) -> List[StateNode]:
     """

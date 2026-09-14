@@ -32,4 +32,4 @@ docker run -it --rm `
     -e GEMINI_API_KEY=$apiKey `
     -e TERM=xterm-256color `
     -e COLORTERM=truecolor `
-    gemini-agent gemini
+    gemini-agent gemini --yolo
