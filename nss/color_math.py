@@ -226,7 +226,7 @@ def apply_grading(img: np.ndarray, state: StateNode,
     # === SSOT AUTO-INTEGRATED DEFAULTS END ===
 
     # 2. Compute pixel luminance using standard Perceptual Luma coefficients (Rec. 709)
-    Y = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+    Y = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]).astype(np.float32)
     L = Y
 
     # Calculate pixel's Saturation (S) and Hue (H)
@@ -345,7 +345,7 @@ def apply_grading(img: np.ndarray, state: StateNode,
         mask_b = cos_val_b ** exp_b + S * hue_weight_b
         shadow_weight_b = np.clip(mask_b, 0.0, 1.0)
 
-    shadow_weight = np.stack([shadow_weight_r, shadow_weight_g, shadow_weight_b], axis=2)
+    shadow_weight = np.stack([shadow_weight_r, shadow_weight_g, shadow_weight_b], axis=2).astype(np.float32)
 
     # Highlights Soft Mask (centered at L = 0.7 or uses polynomial per channel based on x_hi = 1.0 - Y)
     x_hi = 1.0 - Y
@@ -392,7 +392,7 @@ def apply_grading(img: np.ndarray, state: StateNode,
         mask_hi_b = np.clip((L_shifted - (0.7 - softness/2.0)) / softness, 0.0, 1.0) + S * hi_hue_weight_b
         highlight_weight_b = np.clip(mask_hi_b, 0.0, 1.0)
 
-    highlight_weight = np.stack([highlight_weight_r, highlight_weight_g, highlight_weight_b], axis=2)
+    highlight_weight = np.stack([highlight_weight_r, highlight_weight_g, highlight_weight_b], axis=2).astype(np.float32)
 
     # Midtones Soft Mask (fills the remaining space between highlights and shadows or uses Gaussian per channel)
     # Red Midtone Mask
@@ -416,7 +416,7 @@ def apply_grading(img: np.ndarray, state: StateNode,
     else:
         midtone_weight_b = np.clip(1.0 - shadow_weight_b - highlight_weight_b + S * mid_hue_weight_b, 0.0, 1.0)
 
-    midtone_weight = np.stack([midtone_weight_r, midtone_weight_g, midtone_weight_b], axis=2)
+    midtone_weight = np.stack([midtone_weight_r, midtone_weight_g, midtone_weight_b], axis=2).astype(np.float32)
 
     # 4. Compute target zone colors
     harmony_mode = state.get("harmony_mode", "Monochromatic")
@@ -494,20 +494,20 @@ def apply_grading(img: np.ndarray, state: StateNode,
     hw = highlight_weight
 
     # Combined RGB offset
-    combined_offset = (sw * delta_sh) + (mw * delta_mid) + (hw * delta_hi)
+    combined_offset = ((sw * delta_sh) + (mw * delta_mid) + (hw * delta_hi)).astype(np.float32)
 
     # Apply combined offset to the original RGB image
-    rgb_graded = rgb + combined_offset
+    rgb_graded = (rgb + combined_offset).astype(np.float32)
 
     # Apply Zone Lightness Adjustments as a luma offset if present
     sh_light = state.get("shadow_light", 0.0)
     mid_light = state.get("midtone_light", 0.0)
     hi_light = state.get("highlight_light", 0.0)
     if sh_light != 0.0 or mid_light != 0.0 or hi_light != 0.0:
-        luma_offset = (sw * sh_light) + (mw * mid_light) + (hw * hi_light)
-        rgb_graded += luma_offset
+        luma_offset = ((sw * sh_light) + (mw * mid_light) + (hw * hi_light)).astype(np.float32)
+        rgb_graded = (rgb_graded + luma_offset).astype(np.float32)
 
-    rgb_graded = np.clip(rgb_graded, 0.0, 1.0)
+    rgb_graded = np.clip(rgb_graded, 0.0, 1.0).astype(np.float32)
 
     # 6. Apply Master Global Hue, Saturation, and Lightness shifts if present
     base_shift = state.get("hue_shift", 0.0)
@@ -527,10 +527,10 @@ def apply_grading(img: np.ndarray, state: StateNode,
         if light_shift != 0.0:
             L_g = np.clip(L_g + light_shift, 0.0, 1.0)
 
-        hls_graded = np.stack([H_g, L_g, S_g], axis=2)
-        rgb_graded = cv2.cvtColor(hls_graded, cv2.COLOR_HLS2RGB)
+        hls_graded = np.stack([H_g, L_g, S_g], axis=2).astype(np.float32)
+        rgb_graded = cv2.cvtColor(hls_graded, cv2.COLOR_HLS2RGB).astype(np.float32)
 
-    return GradedArray(np.clip(rgb_graded, 0.0, 1.0), shadow_weight)
+    return GradedArray(np.clip(rgb_graded, 0.0, 1.0).astype(np.float32), shadow_weight)
 
 def generate_monochromatic_mutations(center: StateNode, axis: MutationAxis = "All", step_size: float = 0.2) -> List[StateNode]:
     """
