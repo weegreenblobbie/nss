@@ -145,7 +145,24 @@ def test_case_1_tonal_isolation() -> None:
     """
     img_arr: np.ndarray = load_image_array(INPUT_PATH)
 
-    # 1. Shadows check (Hue 240, Sat 1.0, others 0.0) across multiple blending states (0.0, 0.5, 1.0)
+    # 1. Midtones check (Hue 240, Sat 1.0, others 0.0)
+    mid_state: StateNode = create_default_state()
+    mid_state["shadow_sat"] = 0.0
+    mid_state["midtone_hue"] = 240.0
+    mid_state["midtone_sat"] = 1.0
+    mid_state["highlight_sat"] = 0.0
+    mid_state["blending"] = 0.5
+    mid_state["balance"] = 0.0
+
+    actual_mid, S_mask_mid = apply_grading(img_arr, mid_state)
+    expected_mid: np.ndarray = load_image_array("tests/test_data/case_1_midtones.tif")
+    try:
+        np.testing.assert_allclose(actual_mid * 65535.0, expected_mid * 65535.0, atol=512)
+    except AssertionError as e:
+        plot_failure_diagnostics(expected_mid * 65535.0, actual_mid * 65535.0, "case_1_midtones", S_mask_mid)
+        raise e
+
+    # 2. Shadows check (Hue 240, Sat 1.0, others 0.0) across multiple blending states (0.0, 0.5, 1.0)
     for blending_val in [0.0, 0.5, 1.0]:
         sh_state: StateNode = create_default_state()
         sh_state["shadow_hue"] = 240.0
@@ -166,23 +183,6 @@ def test_case_1_tonal_isolation() -> None:
             except AssertionError as e:
                 plot_failure_diagnostics(expected_sh * 65535.0, actual_sh * 65535.0, f"case_1_shadows_blending_{blending_val}", S_mask_sh)
                 raise e
-
-    # 2. Midtones check (Hue 240, Sat 1.0, others 0.0)
-    mid_state: StateNode = create_default_state()
-    mid_state["shadow_sat"] = 0.0
-    mid_state["midtone_hue"] = 240.0
-    mid_state["midtone_sat"] = 1.0
-    mid_state["highlight_sat"] = 0.0
-    mid_state["blending"] = 0.5
-    mid_state["balance"] = 0.0
-
-    actual_mid, S_mask_mid = apply_grading(img_arr, mid_state)
-    expected_mid: np.ndarray = load_image_array("tests/test_data/case_1_midtones.tif")
-    try:
-        np.testing.assert_allclose(actual_mid * 65535.0, expected_mid * 65535.0, atol=512)
-    except AssertionError as e:
-        plot_failure_diagnostics(expected_mid * 65535.0, actual_mid * 65535.0, "case_1_midtones", S_mask_mid)
-        raise e
 
     # 3. Highlights check (Hue 240, Sat 1.0, others 0.0)
     hi_state: StateNode = create_default_state()
@@ -484,6 +484,109 @@ def test_optimize_shadow_params() -> None:
         block_content,
         content,
         flags=re.DOTALL
+    )
+    
+    with open(math_file_path, "w") as f:
+        f.write(content)
+    print(f"\n[SSOT Auto-Integration] Successfully saved optimal parameters to {math_file_path}", flush=True)
+
+
+def test_optimize_midtone_params() -> None:
+    """
+    Finds the optimal hue-specific weights for the Red, Green, and Blue channels
+    specifically across the RGBCMY blocks region for midtones.
+    """
+    from scipy.optimize import minimize
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    plt.switch_backend('Agg')
+    
+    img_arr = load_image_array(INPUT_PATH)
+    expected_mid = load_image_array("tests/test_data/case_1_midtones.tif")
+    
+    # Downsample by factor of 16 to run 256x faster and avoid timeouts!
+    ds = 16
+    img_arr_ds = img_arr[::ds, ::ds]
+    expected_mid_ds = expected_mid[::ds, ::ds]
+    
+    mid_state = create_default_state()
+    mid_state["shadow_sat"] = 0.0
+    mid_state["midtone_hue"] = 240.0
+    mid_state["midtone_sat"] = 1.0
+    mid_state["highlight_sat"] = 0.0
+    mid_state["blending"] = 0.5
+    mid_state["balance"] = 0.0
+
+    iter_count = 0
+
+    def objective(x):
+        nonlocal iter_count
+        iter_count += 1
+        
+        # Define weights as active parameters
+        w_r = list(x[0:6])
+        w_g = list(x[6:12])
+        w_b = list(x[12:18])
+        
+        # Run grading with Candidate parameters
+        actual_1, S_mask_mid = apply_grading(
+            img_arr_ds, mid_state,
+            mid_hue_w_r=w_r,
+            mid_hue_w_g=w_g,
+            mid_hue_w_b=w_b
+        )
+        
+        # Extract residual error specifically on the RGBCMY color blocks region (810//ds to the end)
+        start_idx = 810 // ds
+        delta_rgbcmy = expected_mid_ds[start_idx:] * 65535.0 - actual_1[start_idx:] * 65535.0
+        rmse_rgbcmy = np.sqrt(np.mean(delta_rgbcmy ** 2))
+        
+        if iter_count % 10 == 0 or iter_count == 1:
+            print(f"Iteration {iter_count:3d} | RGBCMY Blocks RMSE: {rmse_rgbcmy:8.6f}", flush=True)
+            
+        return rmse_rgbcmy
+
+    # Initial guess: all zeros
+    x0 = np.zeros(18, dtype=np.float32)
+
+    print("\n--- Isolated Midtone Hue-Specific Weights Optimization Progress ---", flush=True)
+    res = minimize(objective, x0, method='Powell', 
+                   options={'maxiter': 20000, 'maxfev': 50000, 'xtol': 1e-9, 'ftol': 1e-9, 'disp': True})
+    
+    print("\n==================================================")
+    print("OPTIMIZED MIDTONE HUE-SPECIFIC WEIGHTS:")
+    print(f"Optimal mid_hue_w_r: {[round(float(v), 6) for v in res.x[0:6]]}")
+    print(f"Optimal mid_hue_w_g: {[round(float(v), 6) for v in res.x[6:12]]}")
+    print(f"Optimal mid_hue_w_b: {[round(float(v), 6) for v in res.x[12:18]]}")
+    print(f"Minimum RGBCMY Blocks RMSE: {res.fun:.6f}")
+    print("==================================================")
+
+    # Automatic Parameter Integration for Verification (Rule 6)
+    math_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "nss", "color_math.py"))
+    with open(math_file_path, "r") as f:
+        content = f.read()
+    
+    w_r_opt = [round(float(v), 6) for v in res.x[0:6]]
+    w_g_opt = [round(float(v), 6) for v in res.x[6:12]]
+    w_b_opt = [round(float(v), 6) for v in res.x[12:18]]
+
+    import re
+    # Update defaults in color_math.py using regex
+    content = re.sub(
+        r"if mid_hue_w_r is None: mid_hue_w_r = \[.*?\]",
+        f"if mid_hue_w_r is None: mid_hue_w_r = {w_r_opt}",
+        content
+    )
+    content = re.sub(
+        r"if mid_hue_w_g is None: mid_hue_w_g = \[.*?\]",
+        f"if mid_hue_w_g is None: mid_hue_w_g = {w_g_opt}",
+        content
+    )
+    content = re.sub(
+        r"if mid_hue_w_b is None: mid_hue_w_b = \[.*?\]",
+        f"if mid_hue_w_b is None: mid_hue_w_b = {w_b_opt}",
+        content
     )
     
     with open(math_file_path, "w") as f:

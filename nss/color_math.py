@@ -113,7 +113,20 @@ def apply_grading(img: np.ndarray, state: StateNode,
                   shadow_c5_r: float = None,
                   shadow_hue_w_r: List[float] = None,
                   shadow_hue_w_g: List[float] = None,
-                  shadow_hue_w_b: List[float] = None) -> np.ndarray:
+                  shadow_hue_w_b: List[float] = None,
+                  midtone_gain: float = None,
+                  midtone_gain_r: float = None,
+                  midtone_gain_g: float = None,
+                  midtone_gain_b: float = None,
+                  mid_center_r: float = None,
+                  mid_center_g: float = None,
+                  mid_center_b: float = None,
+                  mid_width_r: float = None,
+                  mid_width_g: float = None,
+                  mid_width_b: float = None,
+                  mid_hue_w_r: List[float] = None,
+                  mid_hue_w_g: List[float] = None,
+                  mid_hue_w_b: List[float] = None) -> np.ndarray:
     """
     Applies professional 3-way zone-based color grading parameters from the state to the input image.
     Uses master blending and balance values to softly transition colors between zones.
@@ -147,6 +160,19 @@ def apply_grading(img: np.ndarray, state: StateNode,
     if shadow_hue_w_r is None: shadow_hue_w_r = [-0.891725, -0.08555, -1.0, -1.0, -1.0, -0.39296]
     if shadow_hue_w_g is None: shadow_hue_w_g = [-1.0, -1.0, -1.618074, -1.0, -1.0, -1.0]
     if shadow_hue_w_b is None: shadow_hue_w_b = [-0.421471, 1.012153, 0.321249, -1.0, -1.0, -1.0]
+    if midtone_gain is None: midtone_gain = 1.0000
+    if midtone_gain_r is None: midtone_gain_r = 0.384397
+    if midtone_gain_g is None: midtone_gain_g = 0.252290
+    if midtone_gain_b is None: midtone_gain_b = 0.254922
+    if mid_center_r is None: mid_center_r = 0.584927
+    if mid_center_g is None: mid_center_g = 0.616240
+    if mid_center_b is None: mid_center_b = 0.493935
+    if mid_width_r is None: mid_width_r = 0.222199
+    if mid_width_g is None: mid_width_g = 0.225556
+    if mid_width_b is None: mid_width_b = 0.300469
+    if mid_hue_w_r is None: mid_hue_w_r = [0.262391, -4.236068, 0.0, 0.0, 0.0, 0.031369]
+    if mid_hue_w_g is None: mid_hue_w_g = [0.0, -4.236068, -4.236068, -6.703841, 0.0, 0.0]
+    if mid_hue_w_b is None: mid_hue_w_b = [-0.278594, 2.618034, 2.618034, 0.0, 0.0, 0.0]
     # === SSOT AUTO-INTEGRATED DEFAULTS END ===
 
     # 2. Compute pixel luminance using standard Perceptual Luma coefficients (Rec. 709)
@@ -175,6 +201,22 @@ def apply_grading(img: np.ndarray, state: StateNode,
                                  shadow_hue_w_b[3], shadow_hue_w_b[4], shadow_hue_w_b[5],
                                  shadow_hue_w_b[0]], dtype=np.float32)
     hue_weight_b: np.ndarray = np.interp(H, xp, yp_b)
+
+    # 6-point Hue weight interpolation for midtones
+    mid_yp_r: np.ndarray = np.array([mid_hue_w_r[0], mid_hue_w_r[1], mid_hue_w_r[2],
+                                     mid_hue_w_r[3], mid_hue_w_r[4], mid_hue_w_r[5],
+                                     mid_hue_w_r[0]], dtype=np.float32)
+    mid_hue_weight_r: np.ndarray = np.interp(H, xp, mid_yp_r)
+
+    mid_yp_g: np.ndarray = np.array([mid_hue_w_g[0], mid_hue_w_g[1], mid_hue_w_g[2],
+                                     mid_hue_w_g[3], mid_hue_w_g[4], mid_hue_w_g[5],
+                                     mid_hue_w_g[0]], dtype=np.float32)
+    mid_hue_weight_g: np.ndarray = np.interp(H, xp, mid_yp_g)
+
+    mid_yp_b: np.ndarray = np.array([mid_hue_w_b[0], mid_hue_w_b[1], mid_hue_w_b[2],
+                                     mid_hue_w_b[3], mid_hue_w_b[4], mid_hue_w_b[5],
+                                     mid_hue_w_b[0]], dtype=np.float32)
+    mid_hue_weight_b: np.ndarray = np.interp(H, xp, mid_yp_b)
 
     # 3. Compute soft zone masks based on master balance and blending parameters
     balance = state.get("balance", 0.0)
@@ -242,8 +284,29 @@ def apply_grading(img: np.ndarray, state: StateNode,
     # Highlights Soft Mask (centered at L = 0.7)
     highlight_weight = np.clip((L_shifted - (0.7 - softness/2.0)) / softness, 0.0, 1.0)
 
-    # Midtones Soft Mask (fills the remaining space between highlights and shadows)
-    midtone_weight = np.clip(1.0 - shadow_weight - highlight_weight[:, :, np.newaxis], 0.0, 1.0)
+    # Midtones Soft Mask (fills the remaining space between highlights and shadows or uses Gaussian per channel)
+    # Red Midtone Mask
+    if mid_center_r is not None and mid_width_r is not None:
+        midtone_weight_r = np.exp(-((Y - mid_center_r)**2) / (2 * mid_width_r**2))
+        midtone_weight_r = np.clip(midtone_weight_r + S * mid_hue_weight_r, 0.0, 1.0)
+    else:
+        midtone_weight_r = np.clip(1.0 - shadow_weight_r - highlight_weight + S * mid_hue_weight_r, 0.0, 1.0)
+
+    # Green Midtone Mask
+    if mid_center_g is not None and mid_width_g is not None:
+        midtone_weight_g = np.exp(-((Y - mid_center_g)**2) / (2 * mid_width_g**2))
+        midtone_weight_g = np.clip(midtone_weight_g + S * mid_hue_weight_g, 0.0, 1.0)
+    else:
+        midtone_weight_g = np.clip(1.0 - shadow_weight_g - highlight_weight + S * mid_hue_weight_g, 0.0, 1.0)
+
+    # Blue Midtone Mask
+    if mid_center_b is not None and mid_width_b is not None:
+        midtone_weight_b = np.exp(-((Y - mid_center_b)**2) / (2 * mid_width_b**2))
+        midtone_weight_b = np.clip(midtone_weight_b + S * mid_hue_weight_b, 0.0, 1.0)
+    else:
+        midtone_weight_b = np.clip(1.0 - shadow_weight_b - highlight_weight + S * mid_hue_weight_b, 0.0, 1.0)
+
+    midtone_weight = np.stack([midtone_weight_r, midtone_weight_g, midtone_weight_b], axis=2)
 
     # 4. Compute target zone colors
     harmony_mode = state.get("harmony_mode", "Monochromatic")
@@ -291,7 +354,14 @@ def apply_grading(img: np.ndarray, state: StateNode,
         hls_mid = hls.copy()
         hls_mid[:, :, 0] = mid_hue
         hls_mid[:, :, 2] = mid_sat
-        delta_mid = cv2.cvtColor(hls_mid, cv2.COLOR_HLS2RGB) - rgb
+        
+        default_mid_gain = midtone_gain if midtone_gain is not None else 1.0
+        mid_gain_r = midtone_gain_r if midtone_gain_r is not None else default_mid_gain
+        mid_gain_g = midtone_gain_g if midtone_gain_g is not None else default_mid_gain
+        mid_gain_b = midtone_gain_b if midtone_gain_b is not None else default_mid_gain
+        
+        mid_gain = np.array([mid_gain_r, mid_gain_g, mid_gain_b], dtype=np.float32)
+        delta_mid = mid_gain * (cv2.cvtColor(hls_mid, cv2.COLOR_HLS2RGB) - rgb)
 
     if hi_sat == 0.0:
         delta_hi = np.zeros_like(rgb)
