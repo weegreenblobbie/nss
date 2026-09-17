@@ -110,7 +110,10 @@ def apply_grading(img: np.ndarray, state: StateNode,
                   shadow_c2_r: float = None,
                   shadow_c3_r: float = None,
                   shadow_c4_r: float = None,
-                  shadow_c5_r: float = None) -> np.ndarray:
+                  shadow_c5_r: float = None,
+                  shadow_hue_w_r: List[float] = None,
+                  shadow_hue_w_g: List[float] = None,
+                  shadow_hue_w_b: List[float] = None) -> np.ndarray:
     """
     Applies professional 3-way zone-based color grading parameters from the state to the input image.
     Uses master blending and balance values to softly transition colors between zones.
@@ -141,10 +144,37 @@ def apply_grading(img: np.ndarray, state: StateNode,
     if shadow_c3_r is None: shadow_c3_r = -19.857885
     if shadow_c4_r is None: shadow_c4_r = -12.806680
     if shadow_c5_r is None: shadow_c5_r = 10.917661
+    if shadow_hue_w_r is None: shadow_hue_w_r = [-0.891725, -0.08555, -1.0, -1.0, -1.0, -0.39296]
+    if shadow_hue_w_g is None: shadow_hue_w_g = [-1.0, -1.0, -1.618074, -1.0, -1.0, -1.0]
+    if shadow_hue_w_b is None: shadow_hue_w_b = [-0.421471, 1.012153, 0.321249, -1.0, -1.0, -1.0]
     # === SSOT AUTO-INTEGRATED DEFAULTS END ===
 
     # 2. Compute pixel luminance using standard Perceptual Luma coefficients (Rec. 709)
-    L = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+    Y = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+    L = Y
+
+    # Calculate pixel's Saturation (S) and Hue (H)
+    hls: np.ndarray = cv2.cvtColor(rgb, cv2.COLOR_RGB2HLS)
+    H: np.ndarray = hls[:, :, 0]
+    S: np.ndarray = hls[:, :, 2]
+
+    # 6-point Hue weight interpolation
+    xp: np.ndarray = np.array([0.0, 60.0, 120.0, 180.0, 240.0, 300.0, 360.0], dtype=np.float32)
+    
+    yp_r: np.ndarray = np.array([shadow_hue_w_r[0], shadow_hue_w_r[1], shadow_hue_w_r[2],
+                                 shadow_hue_w_r[3], shadow_hue_w_r[4], shadow_hue_w_r[5],
+                                 shadow_hue_w_r[0]], dtype=np.float32)
+    hue_weight_r: np.ndarray = np.interp(H, xp, yp_r)
+
+    yp_g: np.ndarray = np.array([shadow_hue_w_g[0], shadow_hue_w_g[1], shadow_hue_w_g[2],
+                                 shadow_hue_w_g[3], shadow_hue_w_g[4], shadow_hue_w_g[5],
+                                 shadow_hue_w_g[0]], dtype=np.float32)
+    hue_weight_g: np.ndarray = np.interp(H, xp, yp_g)
+
+    yp_b: np.ndarray = np.array([shadow_hue_w_b[0], shadow_hue_w_b[1], shadow_hue_w_b[2],
+                                 shadow_hue_w_b[3], shadow_hue_w_b[4], shadow_hue_w_b[5],
+                                 shadow_hue_w_b[0]], dtype=np.float32)
+    hue_weight_b: np.ndarray = np.interp(H, xp, yp_b)
 
     # 3. Compute soft zone masks based on master balance and blending parameters
     balance = state.get("balance", 0.0)
@@ -167,22 +197,25 @@ def apply_grading(img: np.ndarray, state: StateNode,
         c3_r = shadow_c3_r if shadow_c3_r is not None else 0.0
         c4_r = shadow_c4_r if shadow_c4_r is not None else 0.0
         c5_r = shadow_c5_r if shadow_c5_r is not None else 0.0
-        x = L
+        x = Y
         mask_r = c0_r + c1_r * x + c2_r * (x ** 2) + c3_r * (x ** 3) + c4_r * (x ** 4) + c5_r * (x ** 5)
+        mask_r = mask_r + S * hue_weight_r
         shadow_weight_r = np.clip(mask_r, 0.0, 1.0)
     else:
         end_r = shadows_end_val_r if shadows_end_val_r is not None else end_val
         t_shadow_r = np.clip((L - 0.02) / end_r, 0.0, 1.0)
         exp_r = shadow_exponent_r if shadow_exponent_r is not None else exp_val
         cos_val_r = np.clip(np.cos(t_shadow_r * np.pi / 2.0), 0.0, 1.0)
-        shadow_weight_r = cos_val_r ** exp_r
+        mask_r = cos_val_r ** exp_r + S * hue_weight_r
+        shadow_weight_r = np.clip(mask_r, 0.0, 1.0)
 
     # Green
     end_g = shadows_end_val_g if shadows_end_val_g is not None else end_val
     t_shadow_g = np.clip((L - 0.02) / end_g, 0.0, 1.0)
     exp_g = shadow_exponent_g if shadow_exponent_g is not None else exp_val
     cos_val_g = np.clip(np.cos(t_shadow_g * np.pi / 2.0), 0.0, 1.0)
-    shadow_weight_g = cos_val_g ** exp_g
+    mask_g = cos_val_g ** exp_g + S * hue_weight_g
+    shadow_weight_g = np.clip(mask_g, 0.0, 1.0)
 
     # Blue
     if shadow_c0 is not None:
@@ -192,15 +225,17 @@ def apply_grading(img: np.ndarray, state: StateNode,
         c3 = shadow_c3 if shadow_c3 is not None else 0.0
         c4 = shadow_c4 if shadow_c4 is not None else 0.0
         c5 = shadow_c5 if shadow_c5 is not None else 0.0
-        x = L
+        x = Y
         mask_b = c0 + c1 * x + c2 * (x ** 2) + c3 * (x ** 3) + c4 * (x ** 4) + c5 * (x ** 5)
+        mask_b = mask_b + S * hue_weight_b
         shadow_weight_b = np.clip(mask_b, 0.0, 1.0)
     else:
         end_b = shadows_end_val_b if shadows_end_val_b is not None else end_val
         t_shadow_b = np.clip((L - 0.02) / end_b, 0.0, 1.0)
         exp_b = shadow_exponent_b if shadow_exponent_b is not None else exp_val
         cos_val_b = np.clip(np.cos(t_shadow_b * np.pi / 2.0), 0.0, 1.0)
-        shadow_weight_b = cos_val_b ** exp_b
+        mask_b = cos_val_b ** exp_b + S * hue_weight_b
+        shadow_weight_b = np.clip(mask_b, 0.0, 1.0)
 
     shadow_weight = np.stack([shadow_weight_r, shadow_weight_g, shadow_weight_b], axis=2)
 

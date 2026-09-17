@@ -370,8 +370,8 @@ def test_case_5_balance_and_blending() -> None:
 
 def test_optimize_shadow_params() -> None:
     """
-    Finds the optimal per-channel values of exponents, gains, and end points
-    across the entire composite image and strictly across the grayscale gradient region.
+    Finds the optimal hue-specific weights for the Red, Green, and Blue channels
+    specifically across the RGBCMY blocks region.
     """
     from scipy.optimize import minimize
     import matplotlib
@@ -401,58 +401,43 @@ def test_optimize_shadow_params() -> None:
         nonlocal iter_count
         iter_count += 1
         
-        # Optimize ONLY Red polynomial coefficients: c0_r, c1_r, c2_r, c3_r, c4_r, c5_r
-        c0_r, c1_r, c2_r, c3_r, c4_r, c5_r = x
+        # Define weights as active parameters
+        w_r = list(x[0:6])
+        w_g = list(x[6:12])
+        w_b = list(x[12:18])
         
-        # Run grading with Candidate parameters (Green & Blue remain static/optimized)
+        # Run grading with Candidate parameters
         actual_1, S_mask_sh = apply_grading(
             img_arr_ds, sh_state,
-            shadows_end_val_r=None,
-            shadows_end_val_g=0.7000,
-            shadow_exponent_r=None,
-            shadow_exponent_g=2.4037,
-            shadow_gain_r=0.5008,
-            shadow_gain_g=0.2572,
-            shadow_gain_b=0.8868,
-            shadow_c0=1.309182,
-            shadow_c1=-2.906569,
-            shadow_c2=-2.326751,
-            shadow_c3=4.856898,
-            shadow_c4=9.353697,
-            shadow_c5=-11.700607,
-            shadow_c0_r=c0_r,
-            shadow_c1_r=c1_r,
-            shadow_c2_r=c2_r,
-            shadow_c3_r=c3_r,
-            shadow_c4_r=c4_r,
-            shadow_c5_r=c5_r
+            shadow_hue_w_r=w_r,
+            shadow_hue_w_g=w_g,
+            shadow_hue_w_b=w_b
         )
         
-        # Extract Red residual error on the grayscale gradient (row 0, channel 0 is Red)
-        delta_red_ramp = expected_sh_ds[0, :, 0] * 65535.0 - actual_1[0, :, 0] * 65535.0
-        rmse_red_ramp = np.sqrt(np.mean(delta_red_ramp ** 2))
+        # Extract residual error specifically on the RGBCMY color blocks region (810//ds to the end)
+        start_idx = 810 // ds
+        delta_rgbcmy = expected_sh_ds[start_idx:] * 65535.0 - actual_1[start_idx:] * 65535.0
+        rmse_rgbcmy = np.sqrt(np.mean(delta_rgbcmy ** 2))
         
-        if iter_count % 5 == 0 or iter_count == 1:
-            print(f"Iteration {iter_count:3d} | Red Ramp RMSE: {rmse_red_ramp:8.6f} | c0_r: {c0_r:.4f} | c1_r: {c1_r:.4f} | c2_r: {c2_r:.4f} | c3_r: {c3_r:.4f} | c4_r: {c4_r:.4f} | c5_r: {c5_r:.4f}", flush=True)
+        if iter_count % 10 == 0 or iter_count == 1:
+            print(f"Iteration {iter_count:3d} | RGBCMY Blocks RMSE: {rmse_rgbcmy:8.6f}", flush=True)
             
-        return rmse_red_ramp
+        return rmse_rgbcmy
 
-    # Initial guess for Red polynomial coefficients (c0_r to c5_r)
-    x0 = [1.0, -2.0, 1.0, 0.0, 0.0, 0.0]
+    # Initial guess for hue-specific weights (18 elements: 6 per channel)
+    # Using -1.0 initial guess ensures that shadow_hue_w_r[0] and other weights allow the optimizer to lift channels
+    x0 = -1.0 * np.ones(18, dtype=np.float32)
 
-    print("\n--- Isolated Red Channel Gradient-Region Optimization Progress ---", flush=True)
-    res = minimize(objective, x0, method='Nelder-Mead', 
-                   options={'maxiter': 100000, 'maxfev': 150000, 'xatol': 1e-12, 'fatol': 1e-12, 'disp': True})
+    print("\n--- Isolated Hue-Specific Weights Optimization Progress ---", flush=True)
+    res = minimize(objective, x0, method='Powell', 
+                   options={'maxiter': 20000, 'maxfev': 50000, 'xtol': 1e-9, 'ftol': 1e-9, 'disp': True})
     
     print("\n==================================================")
-    print("OPTIMIZED SHADOW POLYNOMIAL COEFFICIENTS (RED):")
-    print(f"Optimal shadow_c0_r: {res.x[0]:.6f}")
-    print(f"Optimal shadow_c1_r: {res.x[1]:.6f}")
-    print(f"Optimal shadow_c2_r: {res.x[2]:.6f}")
-    print(f"Optimal shadow_c3_r: {res.x[3]:.6f}")
-    print(f"Optimal shadow_c4_r: {res.x[4]:.6f}")
-    print(f"Optimal shadow_c5_r: {res.x[5]:.6f}")
-    print(f"Minimum Red Ramp RMSE:     {res.fun:.6f}")
+    print("OPTIMIZED HUE-SPECIFIC WEIGHTS:")
+    print(f"Optimal shadow_hue_w_r: {[round(float(v), 6) for v in res.x[0:6]]}")
+    print(f"Optimal shadow_hue_w_g: {[round(float(v), 6) for v in res.x[6:12]]}")
+    print(f"Optimal shadow_hue_w_b: {[round(float(v), 6) for v in res.x[12:18]]}")
+    print(f"Minimum RGBCMY Blocks RMSE: {res.fun:.6f}")
     print("==================================================")
 
     # Automatic Parameter Integration for Verification (Rule 6)
@@ -460,28 +445,35 @@ def test_optimize_shadow_params() -> None:
     with open(math_file_path, "r") as f:
         content = f.read()
     
-    # Construct the newly optimized default marker block (Red and Blue updated, Green static)
+    w_r_opt = [round(float(v), 6) for v in res.x[0:6]]
+    w_g_opt = [round(float(v), 6) for v in res.x[6:12]]
+    w_b_opt = [round(float(v), 6) for v in res.x[12:18]]
+
+    # Construct the newly optimized default marker block
     block_lines = [
         "    # === SSOT AUTO-INTEGRATED DEFAULTS START ===",
-        f"    if shadows_end_val_r is None: shadows_end_val_r = 0.7000",
-        f"    if shadows_end_val_g is None: shadows_end_val_g = 0.7000",
-        f"    if shadow_exponent_r is None: shadow_exponent_r = 3.2158",
-        f"    if shadow_exponent_g is None: shadow_exponent_g = 2.4037",
-        f"    if shadow_gain_r is None: shadow_gain_r = 0.5008",
-        f"    if shadow_gain_g is None: shadow_gain_g = 0.2572",
-        f"    if shadow_gain_b is None: shadow_gain_b = 0.8868",
-        f"    if shadow_c0 is None: shadow_c0 = 1.309182",
-        f"    if shadow_c1 is None: shadow_c1 = -2.906569",
-        f"    if shadow_c2 is None: shadow_c2 = -2.326751",
-        f"    if shadow_c3 is None: shadow_c3 = 4.856898",
-        f"    if shadow_c4 is None: shadow_c4 = 9.353697",
-        f"    if shadow_c5 is None: shadow_c5 = -11.700607",
-        f"    if shadow_c0_r is None: shadow_c0_r = {res.x[0]:.6f}",
-        f"    if shadow_c1_r is None: shadow_c1_r = {res.x[1]:.6f}",
-        f"    if shadow_c2_r is None: shadow_c2_r = {res.x[2]:.6f}",
-        f"    if shadow_c3_r is None: shadow_c3_r = {res.x[3]:.6f}",
-        f"    if shadow_c4_r is None: shadow_c4_r = {res.x[4]:.6f}",
-        f"    if shadow_c5_r is None: shadow_c5_r = {res.x[5]:.6f}",
+        "    if shadows_end_val_r is None: shadows_end_val_r = 0.7000",
+        "    if shadows_end_val_g is None: shadows_end_val_g = 0.7000",
+        "    if shadow_exponent_r is None: shadow_exponent_r = 3.2158",
+        "    if shadow_exponent_g is None: shadow_exponent_g = 2.4037",
+        "    if shadow_gain_r is None: shadow_gain_r = 0.5008",
+        "    if shadow_gain_g is None: shadow_gain_g = 0.2572",
+        "    if shadow_gain_b is None: shadow_gain_b = 0.8868",
+        "    if shadow_c0 is None: shadow_c0 = 1.309182",
+        "    if shadow_c1 is None: shadow_c1 = -2.906569",
+        "    if shadow_c2 is None: shadow_c2 = -2.326751",
+        "    if shadow_c3 is None: shadow_c3 = 4.856898",
+        "    if shadow_c4 is None: shadow_c4 = 9.353697",
+        "    if shadow_c5 is None: shadow_c5 = -11.700607",
+        "    if shadow_c0_r is None: shadow_c0_r = 4.432887",
+        "    if shadow_c1_r is None: shadow_c1_r = -22.814433",
+        "    if shadow_c2_r is None: shadow_c2_r = 40.281313",
+        "    if shadow_c3_r is None: shadow_c3_r = -19.857885",
+        "    if shadow_c4_r is None: shadow_c4_r = -12.806680",
+        "    if shadow_c5_r is None: shadow_c5_r = 10.917661",
+        f"    if shadow_hue_w_r is None: shadow_hue_w_r = {w_r_opt}",
+        f"    if shadow_hue_w_g is None: shadow_hue_w_g = {w_g_opt}",
+        f"    if shadow_hue_w_b is None: shadow_hue_w_b = {w_b_opt}",
         "    # === SSOT AUTO-INTEGRATED DEFAULTS END ==="
     ]
     block_content = "\n".join(block_lines)
