@@ -41,26 +41,100 @@ Apply the following to `input_synthetic.tif`:
 
 *(Execution Note: The GA will load all 6 images for a given zone at once, evaluate the parameters against the whole color wheel simultaneously, and return the average RMSE. This eliminates mathematical loopholes).*
 
-### Test Suite B: The Overlap & Boundary Calibration (8 Exports)
-*Goal: Train the Blending and Balance parameters. With structural curves locked from Suite A, we introduce opposing colors to map Lightroom's overlap mathematics.*
+### Test Suite B: Global Modifiers Calibration (36 Exports)
+*Goal: Train Blending and Balance. We sweep each zone in complete isolation to watch how the global sliders stretch and shift their specific curves. Finally, we turn all three on to solve the additive overlap.*
 
-**LR Settings:**
-*   Shadows: Hue = 240 (Blue), Sat = 100
-*   Highlights: Hue = 60 (Yellow), Sat = 100
-*   Midtones: Sat = 0
-*   Apply to `input_synthetic.tif`
+**All exports in this suite are applied to: `input_synthetic.tif`**
 
-**The Balance Sweep (Blending = 50):**
-*   `train_bal_neg100.tif` (Balance = -100)
-*   `train_bal_neg50.tif` (Balance = -50)
-*   `train_bal_pos50.tif` (Balance = +50)
-*   `train_bal_pos100.tif` (Balance = +100)
+**1. Midtone-Only Balance Sweep**
+*Goal: Tracks how Balance shifts the Midtone center of gravity.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 0, Saturation = 0
+    *   Midtones: Hue = 0, Saturation = 100
+    *   Highlights: Hue = 0, Saturation = 0
+    *   Blending = 50
+*   **Exports:**
+    *   `train_bal_mid_neg100.tif` (Balance = -100)
+    *   `train_bal_mid_neg50.tif` (Balance = -50)
+    *   `train_bal_mid_pos50.tif` (Balance = +50)
+    *   `train_bal_mid_pos100.tif` (Balance = +100)
 
-**The Blending Sweep (Balance = 0):**
-*   `train_blend_0.tif` (Blending = 0)
-*   `train_blend_25.tif` (Blending = 25)
-*   `train_blend_75.tif` (Blending = 75)
-*   `train_blend_100.tif` (Blending = 100)
+**2. Midtone-Only Blending Sweep**
+*Goal: Tracks how Blending stretches or narrows the Midtone width.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 0, Saturation = 0
+    *   Midtones: Hue = 0, Saturation = 100
+    *   Highlights: Hue = 0, Saturation = 0
+    *   Balance = 0
+*   **Exports:**
+    *   `train_blend_mid_0.tif` (Blending = 0)
+    *   `train_blend_mid_25.tif` (Blending = 25)
+    *   `train_blend_mid_75.tif` (Blending = 75)
+    *   `train_blend_mid_100.tif` (Blending = 100)
+
+**3. Shadow-Only Balance Sweep**
+*Goal: Tracks how Balance shifts the Shadow center of gravity.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 240, Saturation = 100
+    *   Midtones: Hue = 0, Saturation = 0
+    *   Highlights: Hue = 0, Saturation = 0
+    *   Blending = 50
+*   **Exports:**
+    *   `train_bal_sh_neg100.tif` (Balance = -100)
+    *   `train_bal_sh_neg50.tif` (Balance = -50)
+    *   `train_bal_sh_pos50.tif` (Balance = +50)
+    *   `train_bal_sh_pos100.tif` (Balance = +100)
+
+**4. Shadow-Only Blending Sweep**
+*Goal: Tracks how Blending stretches or narrows the Shadow width.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 240, Saturation = 100
+    *   Midtones: Hue = 0, Saturation = 0
+    *   Highlights: Hue = 0, Saturation = 0
+    *   Balance = 0
+*   **Exports:**
+    *   `train_blend_sh_0.tif` (Blending = 0)
+    *   `train_blend_sh_25.tif` (Blending = 25)
+    *   `train_blend_sh_75.tif` (Blending = 75)
+    *   `train_blend_sh_100.tif` (Blending = 100)
+
+**5. Highlight-Only Balance Sweep**
+*Goal: Tracks how Balance shifts the Highlight center of gravity.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 0, Saturation = 0
+    *   Midtones: Hue = 0, Saturation = 0
+    *   Highlights: Hue = 60, Saturation = 100
+    *   Blending = 50
+*   **Exports:**
+    *   `train_bal_hi_neg100.tif` (Balance = -100)
+    *   `train_bal_hi_neg50.tif` (Balance = -50)
+    *   `train_bal_hi_pos50.tif` (Balance = +50)
+    *   `train_bal_hi_pos100.tif` (Balance = +100)
+
+**6. Highlight-Only Blending Sweep**
+*Goal: Tracks how Blending stretches or narrows the Highlight width.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 0, Saturation = 0
+    *   Midtones: Hue = 0, Saturation = 0
+    *   Highlights: Hue = 60, Saturation = 100
+    *   Balance = 0
+*   **Exports:**
+    *   `train_blend_hi_0.tif` (Blending = 0)
+    *   `train_blend_hi_25.tif` (Blending = 25)
+    *   `train_blend_hi_75.tif` (Blending = 75)
+    *   `train_blend_hi_100.tif` (Blending = 100)
+
+**7. The Trinity Overlap (Final Overlap Calibration)**
+*Goal: The ultimate test of all zones interacting at maximum saturation. By using perfectly equidistant RGB primaries (0, 120, 240), we stress-test the mathematical symmetry of the blending overlaps.*
+*   **Locked Settings:** 
+    *   Shadows: Hue = 240, Saturation = 100
+    *   Midtones: Hue = 0, Saturation = 100
+    *   Highlights: Hue = 120, Saturation = 100
+*   **Exports:**
+    *   `train_trinity_blend_0.tif` (Blending = 0, Balance = 0)
+    *   `train_trinity_blend_100.tif` (Blending = 100, Balance = 0)
+    *   `train_trinity_bal_neg100.tif` (Blending = 50, Balance = -100)
+    *   `train_trinity_bal_pos100.tif` (Blending = 50, Balance = +100)
 
 ---
 
@@ -76,6 +150,7 @@ Once the GA has output its final Python dictionary of optimized parameters, we p
     *   Highlights: Sat = 0
     *   Blending = 60, Balance = -15
 *   **Exports:**
+    *   `val_cinematic_synthetic.tif` (Applied to `input_synthetic.tif`)
     *   `val_cinematic_portrait.tif` (Applied to `input_portrait.tif`)
     *   `val_cinematic_landscape.tif` (Applied to `input_landscape.tif`)
 
@@ -87,6 +162,7 @@ Once the GA has output its final Python dictionary of optimized parameters, we p
     *   Highlights: Hue = 50 (Warm Yellow), Sat = 50
     *   Blending = 100 (Maximum overlap), Balance = +25
 *   **Exports:**
+    *   `val_vintage_synthetic.tif` (Applied to `input_synthetic.tif`)
     *   `val_vintage_portrait.tif` (Applied to `input_portrait.tif`)
     *   `val_vintage_landscape.tif` (Applied to `input_landscape.tif`)
 
@@ -100,3 +176,4 @@ Once the GA has output its final Python dictionary of optimized parameters, we p
 *   **Exports:**
     *   `val_toxic_synthetic.tif` (Applied to `input_synthetic.tif`)
     *   `val_toxic_portrait.tif` (Applied to `input_portrait.tif`)
+    *   `val_toxic_landscape.tif` (Appied to `input_landscape.tif`)
