@@ -1,6 +1,7 @@
 import math
 import numpy as np
 from typing import Optional
+from nss.color_math import WHEEL_ANGLES, HSL_ANGLES, wheel_to_hsl, hsl_to_wheel
 from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
 from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtGui import (
@@ -31,9 +32,9 @@ class ColorWheel(QWidget):
     colorChanged = pyqtSignal(float, float)  # Emits (hue, saturation)
     interactionFinished = pyqtSignal(float, float)  # Emits (hue, saturation) when mouse is released
 
-    # Perceptual Mapping: Expands warm tones (skin colors), slightly compresses digital greens/blues
-    WHEEL_ANGLES = [0.0, 60.0, 120.0, 180.0, 225.0, 270.0, 315.0, 360.0]
-    HSL_ANGLES   = [0.0, 30.0,  60.0, 120.0, 180.0, 240.0, 300.0, 360.0]
+    # Perceptual Mapping: Calibrated against Adobe Lightroom color wheel (from nss.color_math)
+    WHEEL_ANGLES = WHEEL_ANGLES
+    HSL_ANGLES   = HSL_ANGLES
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -47,10 +48,10 @@ class ColorWheel(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor)
 
     def _wheel_to_hsl(self, angle: float) -> float:
-        return float(np.interp(angle % 360.0, self.WHEEL_ANGLES, self.HSL_ANGLES))
+        return float(wheel_to_hsl(angle))
 
     def _hsl_to_wheel(self, angle: float) -> float:
-        return float(np.interp(angle % 360.0, self.HSL_ANGLES, self.WHEEL_ANGLES))
+        return float(hsl_to_wheel(angle))
 
     def set_color(self, hue: float, sat: float) -> None:
         """

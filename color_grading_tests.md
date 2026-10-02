@@ -1,179 +1,254 @@
-# The Ultimate Color Grading Training & Validation Curriculum
+# Lightroom Color Grading: Final Extraction Protocol
 
-To permanently prevent overfitting and ensure our custom color grading math perfectly mimics Adobe Lightroom, this curriculum forces the Genetic Algorithm (GA) to map the entire color wheel (solving the 6-point hue spline) and uses holdout images to verify the math generalizes to real-world pixel distributions.
+**Input Image:** The 16-bit `tests/test_data/input_synthetic.tif` (2048x1200).
+**Export Format:** 16-bit TIFF, Uncompressed, sRGB or ProPhoto RGB (ensure it exactly matches the input color space).
+**Prerequisites:**
 
-## Phase 1: The Base Images (The Anchors)
-We need three base images. The GA will train heavily on the synthetic image, but we will use the real images to verify it generalizes to real-world photography (where midtones and shadows blend unpredictably).
-
-*Note: All images and exports MUST be 16-bit uncompressed TIFFs to prevent compression artifacts from skewing the RMSE.*
-
-*   **`input_synthetic.tif`**: A purely mathematical chart containing:
-    *   A smooth grayscale ramp (0 to 255).
-    *   A 50% neutral gray block.
-    *   Pure RGB & CMY blocks (Red, Green, Blue, Cyan, Magenta, Yellow at 100% saturation, 50% luminance).
-*   **`input_portrait.tif`**: A high-quality photo of a person (tests complex skin tones, warm midtones, and smooth highlight falloff).
-*   **`input_landscape.tif`**: A high-dynamic-range photo (tests deep crushed shadows in trees/rocks, bright sky, high contrast).
+* Ensure **ALL** other Lightroom Develop settings (Exposure, Contrast, Profile, Tone Curve, Calibration, Optics) are strictly at `0` or disabled.
+* Only manipulate the Color Grading panel.
+* Unless explicitly stated in a section, assume inactive wheels have `Sat = 0, Lum = 0`, `Blending = 50`, and `Balance = 0`.
 
 ---
 
-## Phase 2: The Training Set (Fed to the GA)
-These images are actively evaluated by the GA to find the structural parameters and hue weights. 
+## Set A: The Chrominance Matrix (18 Images)
 
-### Test Suite A: The Spline Calibration (18 Exports)
-*Goal: Lock in the structural curves (Centers, Widths, Gains) and the exact Hue Multipliers for all three zones across the entire color wheel.*
+**Purpose:** Maps the 3x2 matrix conversion from UI polar coordinates (Hue) to exact $\Delta RGB$ shifts for each individual tonal mask.
 
-**LR Settings:** Blending = `50`, Balance = `0`. 
-Apply the following to `input_synthetic.tif`:
+### 1. Shadows Wheel Sweep
 
-**Shadows Isolated (Sat = 100, Mids/Highs Sat = 0)**
-*   `train_sh_0.tif` (Hue = 0 / Red)
-*   `train_sh_60.tif` (Hue = 60 / Yellow)
-*   `train_sh_120.tif` (Hue = 120 / Green)
-*   `train_sh_180.tif` (Hue = 180 / Cyan)
-*   `train_sh_240.tif` (Hue = 240 / Blue)
-*   `train_sh_300.tif` (Hue = 300 / Magenta)
+* **Base Settings:** Midtones Off, Highlights Off. Blending = 50, Balance = 0.
+* **Shadows Settings:** Saturation = 100, Luminance = 0.
+* **Adjust:** Shadows Hue slider.
+* `set_a_sh_h0.tif` (Hue = 0)
+* `set_a_sh_h60.tif` (Hue = 60)
+* `set_a_sh_h120.tif` (Hue = 120)
+* `set_a_sh_h180.tif` (Hue = 180)
+* `set_a_sh_h240.tif` (Hue = 240)
+* `set_a_sh_h300.tif` (Hue = 300)
 
-**Midtones Isolated (Sat = 100, Shadows/Highs Sat = 0)**
-*   `train_mid_0.tif` to `train_mid_300.tif` (Same 6 hues as above)
+### 2. Midtones Wheel Sweep
 
-**Highlights Isolated (Sat = 100, Shadows/Mids Sat = 0)**
-*   `train_hi_0.tif` to `train_hi_300.tif` (Same 6 hues as above)
+* **Base Settings:** Shadows Off, Highlights Off. Blending = 50, Balance = 0.
+* **Midtones Settings:** Saturation = 100, Luminance = 0.
+* **Adjust:** Midtones Hue slider.
+* `set_a_mid_h0.tif` (Hue = 0)
+* `set_a_mid_h60.tif` (Hue = 60)
+* `set_a_mid_h120.tif` (Hue = 120)
+* `set_a_mid_h180.tif` (Hue = 180)
+* `set_a_mid_h240.tif` (Hue = 240)
+* `set_a_mid_h300.tif` (Hue = 300)
 
-*(Execution Note: The GA will load all 6 images for a given zone at once, evaluate the parameters against the whole color wheel simultaneously, and return the average RMSE. This eliminates mathematical loopholes).*
+### 3. Highlights Wheel Sweep
 
-### Test Suite B: Global Modifiers Calibration (36 Exports)
-*Goal: Train Blending and Balance. We sweep each zone in complete isolation to watch how the global sliders stretch and shift their specific curves. Finally, we turn all three on to solve the additive overlap.*
-
-**All exports in this suite are applied to: `input_synthetic.tif`**
-
-**1. Midtone-Only Balance Sweep**
-*Goal: Tracks how Balance shifts the Midtone center of gravity.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 0, Saturation = 0
-    *   Midtones: Hue = 0, Saturation = 100
-    *   Highlights: Hue = 0, Saturation = 0
-    *   Blending = 50
-*   **Exports:**
-    *   `train_bal_mid_neg100.tif` (Balance = -100)
-    *   `train_bal_mid_neg50.tif` (Balance = -50)
-    *   `train_bal_mid_pos50.tif` (Balance = +50)
-    *   `train_bal_mid_pos100.tif` (Balance = +100)
-
-**2. Midtone-Only Blending Sweep**
-*Goal: Tracks how Blending stretches or narrows the Midtone width.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 0, Saturation = 0
-    *   Midtones: Hue = 0, Saturation = 100
-    *   Highlights: Hue = 0, Saturation = 0
-    *   Balance = 0
-*   **Exports:**
-    *   `train_blend_mid_0.tif` (Blending = 0)
-    *   `train_blend_mid_25.tif` (Blending = 25)
-    *   `train_blend_mid_75.tif` (Blending = 75)
-    *   `train_blend_mid_100.tif` (Blending = 100)
-
-**3. Shadow-Only Balance Sweep**
-*Goal: Tracks how Balance shifts the Shadow center of gravity.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 240, Saturation = 100
-    *   Midtones: Hue = 0, Saturation = 0
-    *   Highlights: Hue = 0, Saturation = 0
-    *   Blending = 50
-*   **Exports:**
-    *   `train_bal_sh_neg100.tif` (Balance = -100)
-    *   `train_bal_sh_neg50.tif` (Balance = -50)
-    *   `train_bal_sh_pos50.tif` (Balance = +50)
-    *   `train_bal_sh_pos100.tif` (Balance = +100)
-
-**4. Shadow-Only Blending Sweep**
-*Goal: Tracks how Blending stretches or narrows the Shadow width.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 240, Saturation = 100
-    *   Midtones: Hue = 0, Saturation = 0
-    *   Highlights: Hue = 0, Saturation = 0
-    *   Balance = 0
-*   **Exports:**
-    *   `train_blend_sh_0.tif` (Blending = 0)
-    *   `train_blend_sh_25.tif` (Blending = 25)
-    *   `train_blend_sh_75.tif` (Blending = 75)
-    *   `train_blend_sh_100.tif` (Blending = 100)
-
-**5. Highlight-Only Balance Sweep**
-*Goal: Tracks how Balance shifts the Highlight center of gravity.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 0, Saturation = 0
-    *   Midtones: Hue = 0, Saturation = 0
-    *   Highlights: Hue = 60, Saturation = 100
-    *   Blending = 50
-*   **Exports:**
-    *   `train_bal_hi_neg100.tif` (Balance = -100)
-    *   `train_bal_hi_neg50.tif` (Balance = -50)
-    *   `train_bal_hi_pos50.tif` (Balance = +50)
-    *   `train_bal_hi_pos100.tif` (Balance = +100)
-
-**6. Highlight-Only Blending Sweep**
-*Goal: Tracks how Blending stretches or narrows the Highlight width.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 0, Saturation = 0
-    *   Midtones: Hue = 0, Saturation = 0
-    *   Highlights: Hue = 60, Saturation = 100
-    *   Balance = 0
-*   **Exports:**
-    *   `train_blend_hi_0.tif` (Blending = 0)
-    *   `train_blend_hi_25.tif` (Blending = 25)
-    *   `train_blend_hi_75.tif` (Blending = 75)
-    *   `train_blend_hi_100.tif` (Blending = 100)
-
-**7. The Trinity Overlap (Final Overlap Calibration)**
-*Goal: The ultimate test of all zones interacting at maximum saturation. By using perfectly equidistant RGB primaries (0, 120, 240), we stress-test the mathematical symmetry of the blending overlaps.*
-*   **Locked Settings:** 
-    *   Shadows: Hue = 240, Saturation = 100
-    *   Midtones: Hue = 0, Saturation = 100
-    *   Highlights: Hue = 120, Saturation = 100
-*   **Exports:**
-    *   `train_trinity_blend_0.tif` (Blending = 0, Balance = 0)
-    *   `train_trinity_blend_100.tif` (Blending = 100, Balance = 0)
-    *   `train_trinity_bal_neg100.tif` (Blending = 50, Balance = -100)
-    *   `train_trinity_bal_pos100.tif` (Blending = 50, Balance = +100)
+* **Base Settings:** Shadows Off, Midtones Off. Blending = 50, Balance = 0.
+* **Highlights Settings:** Saturation = 100, Luminance = 0.
+* **Adjust:** Highlights Hue slider.
+* `set_a_hi_h0.tif` (Hue = 0)
+* `set_a_hi_h60.tif` (Hue = 60)
+* `set_a_hi_h120.tif` (Hue = 120)
+* `set_a_hi_h180.tif` (Hue = 180)
+* `set_a_hi_h240.tif` (Hue = 240)
+* `set_a_hi_h300.tif` (Hue = 300)
 
 ---
 
-## Phase 3: The Generalization Set (The True Test)
-**These images are NEVER seen by the Genetic Algorithm.** 
-Once the GA has output its final Python dictionary of optimized parameters, we plug them into our engine and process the base images. If our RMSE is extremely low compared to these Lightroom exports, the math is officially solved.
+## Set B: Saturation Scaling & Gamut Protection (6 Images)
 
-### Validation 1: The "Cinematic Teal & Orange"
-*Goal: Test complex skin-tone preservation and heavy shadow pushing.*
-*   **LR Settings:** 
-    *   Shadows: Hue = 220, Sat = 60
-    *   Midtones: Hue = 35, Sat = 45
-    *   Highlights: Sat = 0
-    *   Blending = 60, Balance = -15
-*   **Exports:**
-    *   `val_cinematic_synthetic.tif` (Applied to `input_synthetic.tif`)
-    *   `val_cinematic_portrait.tif` (Applied to `input_portrait.tif`)
-    *   `val_cinematic_landscape.tif` (Applied to `input_landscape.tif`)
+**Purpose:** Determines if UI Saturation scales linearly, and measures how Lightroom attenuates the tint on pixels that are already highly saturated (Gamut roll-off).
 
-### Validation 2: The "Vintage Pastel"
-*Goal: Test highlight coloration and high-luminance overlaps.*
-*   **LR Settings:**
-    *   Shadows: Hue = 320 (Magenta), Sat = 20
-    *   Midtones: Sat = 0
-    *   Highlights: Hue = 50 (Warm Yellow), Sat = 50
-    *   Blending = 100 (Maximum overlap), Balance = +25
-*   **Exports:**
-    *   `val_vintage_synthetic.tif` (Applied to `input_synthetic.tif`)
-    *   `val_vintage_portrait.tif` (Applied to `input_portrait.tif`)
-    *   `val_vintage_landscape.tif` (Applied to `input_landscape.tif`)
+### 1. Midtones Red Saturation
 
-### Validation 3: The "Toxic Wash" (Edge Case Stress Test)
-*Goal: Test extreme non-complementary colors. Verifies our math doesn't clip, tear, or break RGB bounds when maxed out with hard boundaries.*
-*   **LR Settings:**
-    *   Shadows: Hue = 120 (Green), Sat = 100
-    *   Midtones: Hue = 270 (Purple), Sat = 100
-    *   Highlights: Hue = 0 (Red), Sat = 100
-    *   Blending = 0 (Hard mathematical boundaries), Balance = 0
-*   **Exports:**
-    *   `val_toxic_synthetic.tif` (Applied to `input_synthetic.tif`)
-    *   `val_toxic_portrait.tif` (Applied to `input_portrait.tif`)
-    *   `val_toxic_landscape.tif` (Appied to `input_landscape.tif`)
+* **Base Settings:** Shadows Off, Highlights Off. Blending = 50, Balance = 0.
+* **Midtones Settings:** Hue = 0, Luminance = 0.
+* **Adjust:** Midtones Saturation slider.
+* `set_b_mid_red_s25.tif` (Sat = 25)
+* `set_b_mid_red_s50.tif` (Sat = 50)
+* `set_b_mid_red_s75.tif` (Sat = 75)
+
+### 2. Midtones Blue Saturation
+
+* **Base Settings:** Shadows Off, Highlights Off. Blending = 50, Balance = 0.
+* **Midtones Settings:** Hue = 240, Luminance = 0.
+* **Adjust:** Midtones Saturation slider.
+* `set_b_mid_blue_s25.tif` (Sat = 25)
+* `set_b_mid_blue_s50.tif` (Sat = 50)
+* `set_b_mid_blue_s75.tif` (Sat = 75)
+
+---
+
+## Set C: Blending and Balance Deformation (12 Images)
+
+**Purpose:** Mathematically defines how the Blending slider alters mask width (standard deviation) and how the Balance slider shifts the mask center point ($\mu$).
+
+### 1. Blending Sweep
+
+* **Base Settings:** Shadows Off, Highlights Off. Balance = 0.
+* **Midtones Settings:** Hue = 240, Saturation = 100, Luminance = 0.
+* **Adjust:** Global Blending slider.
+* `set_c_mid_blend_0.tif` (Blending = 0)
+* `set_c_mid_blend_25.tif` (Blending = 25)
+* `set_c_mid_blend_75.tif` (Blending = 75)
+* `set_c_mid_blend_100.tif` (Blending = 100)
+
+### 2. Balance Sweep (Midtones)
+
+* **Base Settings:** Shadows Off, Highlights Off. Blending = 50.
+* **Midtones Settings:** Hue = 240, Saturation = 100, Luminance = 0.
+* **Adjust:** Global Balance slider.
+* `set_c_mid_bal_neg100.tif` (Balance = -100)
+* `set_c_mid_bal_neg50.tif` (Balance = -50)
+* `set_c_mid_bal_pos50.tif` (Balance = +50)
+* `set_c_mid_bal_pos100.tif` (Balance = +100)
+
+### 3. Balance Edge Cases (Shadows)
+
+* **Base Settings:** Midtones Off, Highlights Off. Blending = 50.
+* **Shadows Settings:** Hue = 240, Saturation = 100, Luminance = 0.
+* **Adjust:** Global Balance slider.
+* `set_c_sh_bal_neg100.tif` (Balance = -100)
+* `set_c_sh_bal_neg50.tif` (Balance = -50)
+* `set_c_sh_bal_pos50.tif` (Balance = +50)
+* `set_c_sh_bal_pos100.tif` (Balance = +100)
+
+### 4. Balance Edge Cases (Highlights)
+
+* **Base Settings:** Shadows Off, Midtones Off. Blending = 50.
+* **Highlights Settings:** Hue = 240, Saturation = 100, Luminance = 0.
+* **Adjust:** Global Balance slider.
+* `set_c_hi_bal_neg100.tif` (Balance = -100)
+* `set_c_hi_bal_neg50.tif` (Balance = -50)
+* `set_c_hi_bal_pos50.tif` (Balance = +50)
+* `set_c_hi_bal_pos100.tif` (Balance = +100)
+
+### 5. Blending Sweep (Shadows)
+
+* **Base Settings:** Midtones Off, Highlights Off. Balance = 0.
+* **Midtones Settings:** Hue = 240, Saturation = 100, Luminance = 0.
+* **Adjust:** Global Blending slider.
+* `set_c_sh_blend_0.tif` (Blending = 0)
+* `set_c_sh_blend_25.tif` (Blending = 25)
+* `set_c_sh_blend_75.tif` (Blending = 75)
+* `set_c_sh_blend_100.tif` (Blending = 100)
+
+---
+
+## Set D: Wheel Luminance Sliders (6 Images)
+
+**Purpose:** Maps the specific luminosity curve added/subtracted when adjusting the lightness of a specific tonal zone.
+
+### 1. Shadows Luminance
+
+* **Base Settings:** Midtones Off, Highlights Off. Blending = 50, Balance = 0.
+* **Shadows Settings:** Hue = 0, Saturation = 0.
+* **Adjust:** Shadows Luminance slider.
+* `set_d_sh_lum_neg100.tif` (Luminance = -100)
+* `set_d_sh_lum_neg50.tif` (Luminance = -50)
+* `set_d_sh_lum_pos50.tif` (Luminance = +50)
+* `set_d_sh_lum_pos100.tif` (Luminance = +100)
+
+### 2. Midtones Luminance
+
+* **Base Settings:** Shadows Off, Highlights Off. Blending = 50, Balance = 0.
+* **Midtones Settings:** Hue = 0, Saturation = 0.
+* **Adjust:** Midtones Luminance slider.
+* `set_d_mid_lum_neg100.tif` (Luminance = -100)
+* `set_d_mid_lum_neg50.tif` (Luminance = -50)
+* `set_d_mid_lum_pos50.tif` (Luminance = +50)
+* `set_d_mid_lum_pos100.tif` (Luminance = +100)
+
+### 3. Highlights Luminance
+
+* **Base Settings:** Shadows Off, Midtones Off. Blending = 50, Balance = 0.
+* **Highlights Settings:** Hue = 0, Saturation = 0.
+* **Adjust:** Highlights Luminance slider.
+* `set_d_hi_lum_neg100.tif` (Luminance = -100)
+* `set_d_hi_lum_neg50.tif` (Luminance = -50)
+* `set_d_hi_lum_pos50.tif` (Luminance = +50)
+* `set_d_hi_lum_pos100.tif` (Luminance = +100)
+
+---
+
+## Set E: The Validation Crucible (10 Images)
+
+**Purpose:** Proves our final mathematical model against random, complex combinations. Prevents overfitting to isolated variables.
+
+### Random Combinations
+
+* **Instructions:** Use a random number generator to pick values for Hue (0-360), Saturation (0-100), and Luminance (-100 to +100) across all 3 wheels simultaneously, along with random Blending (0-100) and Balance (-100 to +100).
+* **Important:** Save a JSON or text file alongside these images documenting the exact settings used for each export.
+* **Exports:**
+* `set_e_rand_01.tif`
+* `set_e_rand_02.tif`
+* `set_e_rand_03.tif`
+* `set_e_rand_04.tif`
+* `set_e_rand_05.tif`
+* `set_e_rand_06.tif`
+* `set_e_rand_07.tif`
+* `set_e_rand_08.tif`
+* `set_e_rand_09.tif`
+* `set_e_rand_10.tif`
+
+ #### 1. set_e_rand_01.tif
+  * Global Controls: Blending = 81, Balance = -72
+  * Shadows: Hue = 12, Saturation = 94, Luminance = -30
+  * Midtones: Hue = 125, Saturation = 28, Luminance = -65
+  * Highlights: Hue = 52, Saturation = 86, Luminance = +89
+
+  #### 2. set_e_rand_02.tif
+  * Global Controls: Blending = 69, Balance = -78
+  * Shadows: Hue = 302, Saturation = 54, Luminance = -92
+  * Midtones: Hue = 15, Saturation = 11, Luminance = -45
+  * Highlights: Hue = 119, Saturation = 64, Luminance = +54
+
+  #### 3. set_e_rand_03.tif
+  * Global Controls: Blending = 3, Balance = +43
+  * Shadows: Hue = 112, Saturation = 57, Luminance = +50
+  * Midtones: Hue = 359, Saturation = 69, Luminance = +7
+  * Highlights: Hue = 101, Saturation = 91, Luminance = +66
+
+  #### 4. set_e_rand_04.tif
+  * Global Controls: Blending = 35, Balance = -99
+  * Shadows: Hue = 81, Saturation = 89, Luminance = +8
+  * Midtones: Hue = 174, Saturation = 35, Luminance = -61
+  * Highlights: Hue = 110, Saturation = 97, Luminance = -14
+
+  #### 5. set_e_rand_05.tif
+  * Global Controls: Blending = 13, Balance = -77
+  * Shadows: Hue = 194, Saturation = 12, Luminance = -9
+  * Midtones: Hue = 176, Saturation = 77, Luminance = -33
+  * Highlights: Hue = 22, Saturation = 93, Luminance = +17
+
+  #### 6. set_e_rand_06.tif
+
+  * Global Controls: Blending = 68, Balance = -69
+  * Shadows: Hue = 193, Saturation = 10, Luminance = +41
+  * Midtones: Hue = 150, Saturation = 80, Luminance = +58
+  * Highlights: Hue = 185, Saturation = 73, Luminance = -51
+
+  #### 7. set_e_rand_07.tif
+
+  * Global Controls: Blending = 90, Balance = -83
+  * Shadows: Hue = 23, Saturation = 84, Luminance = -42
+  * Midtones: Hue = 148, Saturation = 10, Luminance = -41
+  * Highlights: Hue = 51, Saturation = 48, Luminance = -29
+
+  #### 8. set_e_rand_08.tif
+
+  * Global Controls: Blending = 58, Balance = +62
+  * Shadows: Hue = 186, Saturation = 20, Luminance = -6
+  * Midtones: Hue = 181, Saturation = 26, Luminance = +71
+  * Highlights: Hue = 136, Saturation = 89, Luminance = +74
+
+  #### 9. set_e_rand_09.tif
+
+  * Global Controls: Blending = 82, Balance = -82
+  * Shadows: Hue = 311, Saturation = 81, Luminance = -57
+  * Midtones: Hue = 273, Saturation = 93, Luminance = -38
+  * Highlights: Hue = 83, Saturation = 59, Luminance = -3
+
+  #### 10. set_e_rand_10.tif
+
+  * Global Controls: Blending = 34, Balance = +63
+  * Shadows: Hue = 352, Saturation = 71, Luminance = -44
+  * Midtones: Hue = 350, Saturation = 41, Luminance = +96
+  * Highlights: Hue = 28, Saturation = 29, Luminance = -92

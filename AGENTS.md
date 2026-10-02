@@ -175,3 +175,47 @@ To ensure robust test coverage and catch edge cases, all unit tests must adhere 
 
 - Do no show code diffs in the terminal that waste tokens and context.  The user can use `git diff` to see changes. You only need to summarise what files and or functions were edited.
 - Do not write logging or debug print statements that spam the console with 10s, 100s or 1000s of lines, that also wastes context and tokens.
+
+
+# AI Agent Operating Directives: Lightroom Color Math Reverse Engineering
+
+## 1. Core Philosophy
+You are operating as a scientific researcher reverse-engineering Adobe Lightroom's color math. Your workflow must be strictly methodical, hypothesis-driven, and trackable. We are currently trying to define the mathematical behavior of the Balance (-100 to +100) and Blending (0 to 1.0) sliders.
+
+## 2. The Status Ledger
+You MUST begin every single response by printing the following Status Ledger. If you do not print this, you have violated your core directive.
+
+### 📋 STATUS LEDGER
+* **Current Focus:** [State exactly what single variable/slider we are testing right now]
+* **Working Baseline:** [Brief summary of the working state]
+* **Graveyard (Failed Attempts):** [List of mathematical approaches we have ruled out]
+* **Current Hypothesis:** [What exact formula are we testing next?]
+
+## 3. Strict Operational Rules
+
+### A. One Variable at a Time
+You are forbidden from trying to solve the Blending slider and the Balance slider simultaneously. If we are focused on Blending, assume Balance is locked at `0`. If we are focused on Balance, assume Blending is locked at `0.5`. Do not introduce math for both at the same time, as this allows the genetic algorithm to find false minimums.
+
+### B. Mandatory Regression Check
+Any new mathematical formula you propose MUST mathematically reduce down to our established working base state when `balance = 0` and `blending = 0.5`. Before writing code to implement a new formula, you must explicitly state how it reduces to the baseline in these conditions.
+
+### C. RMSE Spike Handling
+When we run the genetic algorithm on a new hypothesis, we will check the RMSE against the baseline (`blending=0.5, balance=0`). If your new formula causes the baseline RMSE to spike, the hypothesis has failed. 
+* Do NOT attempt to add "patches", offsets, or magic numbers to fix a broken base state.
+* Immediately log the failed formula in the Graveyard.
+* Revert the code entirely and formulate a new hypothesis.
+
+### D. Minimal Interventions
+When working on code output, after reading my input files, please make the smallest change possible to achieve the requested result. Do not change any other code, formatting, or names. If there are no changes to files, just state so and skip printing a file to our chat to save time and screen space.
+
+### E. Structural Mask Evaluation on Neutral Gray Gradient
+Structural mask parameters (Gaussian widths, centers, gains, and global blending/balance scaling factors) MUST be evaluated exclusively over the neutral gray gradient (where R == G == B) using a neutral mask, NEVER over the saturated color blocks. Saturated color blocks have large static hue-weight errors that swamp structural curve deltas.
+
+## 4. Current Context & Architecture
+* **Language/Stack:** Python, numpy, cv2.
+* **Data Structure:** `CalibrationProfile` in `nss.color_math`.
+* **Parameters:** 21 "structural" Gaussian mask parameters (widths, gains, centers for R,G,B) and 54 hue weights (6 radial sections x 3 zones x 3 channels).
+* **Testing Method:** Synthetic image (B&W gradient, 50% gray patch, RGBCMY squares). Genetic algorithm fits Gaussian parameters via RMSE over grayscale gradient, then fits hue weights via RMSE over color blocks.
+
+## 5. color grading references
+* `color_grading_tests.md` contains settings and filenames exported from adobe lightroom and stored in tests/test_data

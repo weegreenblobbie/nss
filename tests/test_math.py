@@ -6,6 +6,8 @@ from nss.color_math import (
     apply_grading,
     generate_mutations,
     StateNode,
+    wheel_to_hsl,
+    hsl_to_wheel,
 )
 
 def test_default_state_creation() -> None:
@@ -208,6 +210,42 @@ def test_saturation_scaling_linearity() -> None:
     # Assert that the maximum absolute pixel difference is very small (< 0.05)
     max_diff = np.max(np.abs(graded_0 - graded_1))
     assert max_diff < 0.05, f"Discontinuity detected! Max diff is {max_diff}"
+
+
+def test_perceptual_hue_mapping() -> None:
+    # 1. Scalar flow check with non-zero values
+    hsl_30 = wheel_to_hsl(26.0)
+    assert np.isclose(hsl_30, 30.0, atol=1e-3)
+    wheel_26 = hsl_to_wheel(30.0)
+    assert np.isclose(wheel_26, 26.0, atol=1e-3)
+
+    hsl_60 = wheel_to_hsl(60.0)
+    assert np.isclose(hsl_60, 60.0, atol=1e-3)
+
+    # 2. Non-square array vectorization check (Rule 20.1: non-square shapes, e.g. (7, 5))
+    wheel_angles = np.array([
+        [0.0, 26.0, 60.0, 153.0, 180.0],
+        [239.0, 309.0, 360.0, 13.0, 43.0],
+        [75.0, 100.0, 160.0, 200.0, 250.0],
+        [280.0, 320.0, 340.0, 350.0, 355.0],
+        [10.0, 20.0, 30.0, 40.0, 50.0],
+        [70.0, 80.0, 90.0, 110.0, 130.0],
+        [150.0, 170.0, 190.0, 210.0, 230.0],
+    ], dtype=np.float32)  # Shape (7, 5)
+
+    mapped_hsl = wheel_to_hsl(wheel_angles)
+    assert mapped_hsl.shape == (7, 5)
+    # Check known non-zero anchor mappings
+    assert np.isclose(mapped_hsl[0, 1], 30.0, atol=1e-3)
+    assert np.isclose(mapped_hsl[0, 2], 60.0, atol=1e-3)
+    assert np.isclose(mapped_hsl[0, 3], 120.0, atol=1e-3)
+    assert np.isclose(mapped_hsl[0, 4], 180.0, atol=1e-3)
+
+    # Invert back
+    roundtrip = hsl_to_wheel(mapped_hsl)
+    assert roundtrip.shape == (7, 5)
+    assert np.allclose(roundtrip, wheel_angles % 360.0, atol=1e-3)
+
 
 
 

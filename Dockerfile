@@ -15,13 +15,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Git and Node.js (for Gemini CLI)
-RUN apt-get update && apt-get install -y curl git \
+RUN apt-get update && apt-get install -y curl git bash \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gemini CLI globally
-RUN npm install -g @google/gemini-cli
+# Set up a non-root user (recommended for Antigravity's security context)
+RUN useradd -m -s /bin/bash ubuntu
+USER ubuntu
+WORKDIR /home/ubuntu
+
+# Pull and run the official Antigravity CLI installation script
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # Install core test dependencies (using headless OpenCV!)
 RUN pip install --upgrade pip
@@ -29,5 +34,8 @@ RUN pip install --no-cache-dir pytest numpy opencv-python-headless
 
 WORKDIR /workspace
 
-# Keep the container alive
-CMD ["/bin/bash"]
+# Explicitly add the installation directory to your system PATH
+ENV PATH="/home/ubuntu/.local/bin:${PATH}"
+
+# Verify installation when the container is run
+CMD ["agy", "--dangerously-skip-permissions"]

@@ -1,6 +1,8 @@
 from dataclasses import dataclass, asdict
 import sys
 import os
+import random
+import json
 
 import pytest
 import numpy as np
@@ -12,7 +14,13 @@ import scipy
 import scipy.optimize
 
 from nss.utils import TiffFile
-from nss.color_math import apply_grading, create_default_state, StateNode
+from nss.color_math import (
+    apply_grading,
+    create_default_state,
+    StateNode,
+    CalibrationProfile,
+    CALIBRATION_PROFILES,
+)
 
 # Constant paths for test data
 INPUT_PATH: str = "tests/test_data/input_synthetic.tif"
@@ -608,6 +616,276 @@ def run_parabola_ga():
         print(f"RMSE: {res.fun:.0f}")
 
 
+def run_ga_optimize_blend(ds: int = 16, workers: int = 1) -> float:
+    """
+    Optimizes global k_blend parameter via Differential Evolution against the 12 Blending sweep exports.
+    """
+    print("\n==================================================")
+    print(" OPTIMIZING BLENDING FACTOR (k_blend) VIA GA ")
+    print("==================================================")
+
+    blend_targets = {
+        "train_blend_sh_0.tif": 0.0,
+        "train_blend_mid_0.tif": 0.0,
+        "train_blend_hi_0.tif": 0.0,
+        "train_blend_sh_25.tif": 0.25,
+        "train_blend_mid_25.tif": 0.25,
+        "train_blend_hi_25.tif": 0.25,
+        "train_blend_sh_75.tif": 0.75,
+        "train_blend_mid_75.tif": 0.75,
+        "train_blend_hi_75.tif": 0.75,
+        "train_blend_sh_100.tif": 1.0,
+        "train_blend_mid_100.tif": 1.0,
+        "train_blend_hi_100.tif": 1.0,
+    }
+
+    img_full = load_image_array(INPUT_PATH)
+    # The top 1/3 of the image (rows 0 to H//3) contains the neutral grayscale ramp
+    row_idx = img_full.shape[0] // 6
+    img_row = img_full[row_idx:row_idx+1, :, :]
+
+    loaded_targets = {}
+    for filename in blend_targets:
+        ref_path = os.path.join("tests", "test_data", filename)
+        ref_full = load_image_array(ref_path)
+        loaded_targets[filename] = ref_full[row_idx:row_idx+1, :, :]
+
+    def objective(x):
+        k_sh, k_mid, k_hi = float(x[0]), float(x[1]), float(x[2])
+
+        total_rmse = 0.0
+        for filename, blend_val in blend_targets.items():
+            ref_row = loaded_targets[filename]
+
+            state = create_default_state()
+            state["balance"] = 0.0
+            state["blending"] = blend_val
+            if "_sh_" in filename:
+                state.update({"shadow_hue": 240.0, "shadow_sat": 1.0, "midtone_sat": 0.0, "highlight_sat": 0.0})
+            elif "_mid_" in filename:
+                state.update({"shadow_sat": 0.0, "midtone_hue": 0.0, "midtone_sat": 1.0, "highlight_sat": 0.0})
+            elif "_hi_" in filename:
+                state.update({"shadow_sat": 0.0, "midtone_sat": 0.0, "highlight_hue": 60.0, "highlight_sat": 1.0})
+
+            actual, _ = apply_grading(
+                img_row,
+                state,
+                k_blend_sh=k_sh,
+                k_blend_mid=k_mid,
+                k_blend_hi=k_hi,
+            )
+            delta = (ref_row - actual) * 65535.0
+            rmse = np.sqrt(np.mean(delta ** 2))
+            total_rmse += rmse
+
+        return total_rmse
+
+    best_rmse = float("inf")
+    gen = 0
+
+    def callback(xk, convergence=0):
+        nonlocal best_rmse, gen
+        gen += 1
+        current_rmse = objective(xk)
+        if current_rmse < best_rmse * 0.95:
+            best_rmse = current_rmse
+            print(f"Gen {gen:4d} | k_sh: {xk[0]:.4f}, k_mid: {xk[1]:.4f}, k_hi: {xk[2]:.4f} | Total RMSE: {current_rmse:.0f}", flush=True)
+
+    bounds = [(-5.0, 5.0), (-5.0, 5.0), (-5.0, 5.0)]
+    res = scipy.optimize.differential_evolution(
+        objective,
+        bounds,
+        strategy=DEConfig.strategy,
+        maxiter=DEConfig.maxiter,
+        popsize=DEConfig.popsize,
+        tol=DEConfig.tol,
+        mutation=DEConfig.mutation,
+        recombination=DEConfig.recombination,
+        init=DEConfig.init,
+        polish=DEConfig.polish,
+        disp=False,
+        callback=callback,
+        workers=workers,
+    )
+
+    optimal_sh, optimal_mid, optimal_hi = float(res.x[0]), float(res.x[1]), float(res.x[2])
+    print(f"\n==================================================")
+    print(f" OPTIMAL k_blend_sh: {optimal_sh:.6f}, k_blend_mid: {optimal_mid:.6f}, k_blend_hi: {optimal_hi:.6f} | RMSE: {res.fun:.2f}")
+    print("==================================================")
+
+    # Save the optimized parameters
+    results = {
+        "k_blend_sh": optimal_sh,
+        "k_blend_mid": optimal_mid,
+        "k_blend_hi": optimal_hi,
+        "rmse": float(res.fun),
+    }
+    save_path = os.path.join("tests", "test_data", "optimized_blend_params.json")
+    with open(save_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Optimized parameters saved to: {save_path}")
+
+    return (optimal_sh, optimal_mid, optimal_hi)
+
+
+class UniversalBaseGAEvaluator:
+    """
+    Multiprocessing-safe objective evaluator for universal base profile optimization.
+    Evaluates 9 parameters (3 sigmas: sigma_sh, sigma_mid, sigma_hi + 6 chrominance matrix values: m00..m21) across baseline test cases.
+    """
+    def __init__(self, img_arr: np.ndarray, loaded_targets: dict, targets: list):
+        self.img_arr = img_arr
+        self.loaded_targets = loaded_targets
+        self.targets = targets
+
+    def __call__(self, x: np.ndarray) -> float:
+        return self.eval_profile(x, jitter=True)
+
+    def eval_profile(self, x: np.ndarray, jitter: bool = True) -> float:
+        profile = CalibrationProfile(
+            sigma_sh=float(x[0]),
+            sigma_mid=float(x[1]),
+            sigma_hi=float(x[2]),
+            m00=float(x[3]),
+            m01=float(x[4]),
+            m10=float(x[5]),
+            m11=float(x[6]),
+            m20=float(x[7]),
+            m21=float(x[8]),
+        )
+
+        total_rmse = 0.0
+        for filename, state_mod in self.targets:
+            ref_img = self.loaded_targets[filename]
+            state = create_default_state()
+            state.update(state_mod)
+            actual, _ = apply_grading(self.img_arr, state, profile=profile)
+            delta = ref_img * 65535.0 - actual * 65535.0
+            rmse = np.sqrt(np.mean(delta ** 2))
+            total_rmse += rmse
+
+        if jitter:
+            total_rmse += random.uniform(-2.0, 2.0)
+        return total_rmse
+
+
+def run_ga_optimize_universal_base(ds: int = 16, workers: int = None) -> np.ndarray:
+    """
+    Optimizes universal base profile (3 sigmas + 6 chrominance matrix values) across base test cases:
+      - Case 1: case_1_shadows, case_1_midtones, case_1_highlights
+      - Case 2: case_2_10, case_2_50, case_2_100
+      - Case 4: case_4
+    """
+    if workers is None:
+        workers = DEConfig.workers
+
+    print("\n==================================================")
+    print(" OPTIMIZING UNIVERSAL BASE PROFILE (9 PARAMS) VIA GA ")
+    print("==================================================")
+
+    targets = [
+        ("case_1_shadows.tif", {
+            "shadow_hue": 240.0, "shadow_sat": 1.0, "midtone_sat": 0.0, "highlight_sat": 0.0,
+            "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_1_midtones.tif", {
+            "shadow_sat": 0.0, "midtone_hue": 240.0, "midtone_sat": 1.0, "highlight_sat": 0.0,
+            "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_1_highlights.tif", {
+            "shadow_hue": 0.0, "shadow_sat": 0.0, "midtone_sat": 0.0,
+            "highlight_hue": 60.0, "highlight_sat": 1.0, "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_2_10.tif", {
+            "shadow_sat": 0.0, "midtone_hue": 0.0, "midtone_sat": 0.10, "highlight_sat": 0.0,
+            "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_2_50.tif", {
+            "shadow_sat": 0.0, "midtone_hue": 0.0, "midtone_sat": 0.50, "highlight_sat": 0.0,
+            "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_2_100.tif", {
+            "shadow_sat": 0.0, "midtone_hue": 0.0, "midtone_sat": 1.0, "highlight_sat": 0.0,
+            "blending": 0.5, "balance": 0.0,
+        }),
+        ("case_4.tif", {
+            "shadow_hue": 30.0, "shadow_sat": 0.5, "midtone_sat": 0.0,
+            "highlight_hue": 210.0, "highlight_sat": 0.5, "blending": 0.5, "balance": 0.0,
+        }),
+    ]
+
+    img_full = load_image_array(INPUT_PATH)
+    img_arr = img_full[::ds, ::ds] if ds > 1 else img_full
+
+    loaded_targets = {}
+    for filename, _ in targets:
+        ref_path = os.path.join("tests", "test_data", filename)
+        ref_full = load_image_array(ref_path)
+        loaded_targets[filename] = ref_full[::ds, ::ds] if ds > 1 else ref_full
+
+    evaluator = UniversalBaseGAEvaluator(img_arr, loaded_targets, targets)
+
+    last_printed_rmse = float("inf")
+    gen = 0
+
+    def callback(xk, convergence=0):
+        nonlocal last_printed_rmse, gen
+        gen += 1
+        current_rmse = evaluator.eval_profile(xk, jitter=False)
+        if current_rmse <= last_printed_rmse * 0.80:
+            last_printed_rmse = current_rmse
+            print(f"Gen {gen:4d} | sig: [{xk[0]:.3f}, {xk[1]:.3f}, {xk[2]:.3f}] | mat: [{xk[3]:.3f}, {xk[4]:.3f}, {xk[5]:.3f}, {xk[6]:.3f}, {xk[7]:.3f}, {xk[8]:.3f}] | Total RMSE: {current_rmse:.1f} (>=20% improvement)", flush=True)
+
+    # Bounds: 3 sigmas (0.05, 2.0), 6 matrix values (-1.0, 1.0)
+    sigma_bounds = [(0.05, 2.0), (0.05, 2.0), (0.05, 2.0)]
+    matrix_bounds = [(-1.0, 1.0)] * 6
+    bounds = sigma_bounds + matrix_bounds
+
+    res = scipy.optimize.differential_evolution(
+        evaluator,
+        bounds,
+        strategy=DEConfig.strategy,
+        maxiter=DEConfig.maxiter,
+        popsize=DEConfig.popsize,
+        tol=DEConfig.tol,
+        mutation=DEConfig.mutation,
+        recombination=DEConfig.recombination,
+        init=DEConfig.init,
+        polish=DEConfig.polish,
+        disp=False,
+        callback=callback,
+        workers=workers,
+        updating=DEConfig.updating
+    )
+
+    opt_profile = CalibrationProfile(
+        sigma_sh=float(res.x[0]),
+        sigma_mid=float(res.x[1]),
+        sigma_hi=float(res.x[2]),
+        m00=float(res.x[3]),
+        m01=float(res.x[4]),
+        m10=float(res.x[5]),
+        m11=float(res.x[6]),
+        m20=float(res.x[7]),
+        m21=float(res.x[8]),
+    )
+    CALIBRATION_PROFILES["universal_base"] = opt_profile
+
+    save_path = os.path.join("tests", "test_data", "universal_base_profile.json")
+    with open(save_path, "w") as f:
+        json.dump(opt_profile.to_dict(), f, indent=2)
+    print("\n==================================================")
+    print(f" UNIVERSAL BASE OPTIMIZATION COMPLETE | Best RMSE: {res.fun:.2f}")
+    print(f" Optimal sigmas: sig_sh={opt_profile.sigma_sh:.6f}, sig_mid={opt_profile.sigma_mid:.6f}, sig_hi={opt_profile.sigma_hi:.6f}")
+    print(f" Optimal matrix: m00={opt_profile.m00:.6f}, m01={opt_profile.m01:.6f}, m10={opt_profile.m10:.6f}, m11={opt_profile.m11:.6f}, m20={opt_profile.m20:.6f}, m21={opt_profile.m21:.6f}")
+    print(f" Saved to: {save_path}")
+    print("==================================================")
+    print("\nProfile Snippet:")
+    print(opt_profile.format_snippet("universal_base"))
+
+    return res.x
+
+
 SAVE_PLOTS = True
 
 def evaluate_and_plot(test_name, ref_img_path, ref_img, py_img, thresh_gray, thresh_neutral, thresh_blocks):
@@ -935,3 +1213,64 @@ def test_case_5_bal_pos100() -> None:
    })
     actual, S_mask = apply_grading(img, state)
     evaluate_and_plot("test_case_5_bal_pos100", ref_path, ref, actual, 591.0, 843.0, 2443.0)
+
+
+@pytest.mark.parametrize("filename, blend", [
+    ("train_blend_sh_0.tif", 0.0),
+    ("train_blend_sh_25.tif", 0.25),
+    ("train_blend_sh_75.tif", 0.75),
+    ("train_blend_sh_100.tif", 1.0),
+    ("train_blend_mid_0.tif", 0.0),
+    ("train_blend_mid_25.tif", 0.25),
+    ("train_blend_mid_75.tif", 0.75),
+    ("train_blend_mid_100.tif", 1.0),
+    ("train_blend_hi_0.tif", 0.0),
+    ("train_blend_hi_25.tif", 0.25),
+    ("train_blend_hi_75.tif", 0.75),
+    ("train_blend_hi_100.tif", 1.0),
+])
+def test_blend(filename: str, blend: float) -> None:
+    """
+    Parametrized check for Blending sweep against Lightroom validation exports.
+    """
+    ref_path = os.path.join("tests", "test_data", filename)
+    ref = load_image_array(ref_path)
+    img = load_image_array(INPUT_PATH)
+    state = create_default_state()
+    state.update({
+        "balance": 0.0,
+        "blending": blend / 100.0 if blend > 1.0 else blend,
+    })
+    if "_sh_" in filename:
+        state.update({
+            "shadow_hue": 240.0,
+            "shadow_sat": 1.0,
+            "midtone_sat": 0.0,
+            "highlight_sat": 0.0,
+        })
+    elif "_mid_" in filename:
+        state.update({
+            "shadow_sat": 0.0,
+            "midtone_hue": 0.0,
+            "midtone_sat": 1.0,
+            "highlight_sat": 0.0,
+        })
+    elif "_hi_" in filename:
+        state.update({
+            "shadow_sat": 0.0,
+            "midtone_sat": 0.0,
+            "highlight_hue": 60.0,
+            "highlight_sat": 1.0,
+        })
+    elif "_trinity_" in filename:
+        state.update({
+            "shadow_hue": 240.0,
+            "shadow_sat": 1.0,
+            "midtone_hue": 0.0,
+            "midtone_sat": 1.0,
+            "highlight_hue": 120.0,
+            "highlight_sat": 1.0,
+        })
+
+    actual, S_mask = apply_grading(img, state)
+    evaluate_and_plot(f"test_blend_{filename}", ref_path, ref, actual, 20000.0, 20000.0, 20000.0)
