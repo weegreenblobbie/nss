@@ -107,7 +107,12 @@
 * **Adjust:** Global Balance slider.
 * `set_c_sh_bal_neg100.tif` (Balance = -100)
 * `set_c_sh_bal_neg50.tif` (Balance = -50)
+* `set_c_sh_bal_pos25.tif` (Balance = +25)
 * `set_c_sh_bal_pos50.tif` (Balance = +50)
+* `set_c_sh_bal_pos60.tif` (Balance = +60)
+* `set_c_sh_bal_pos70.tif` (Balance = +70)
+* `set_c_sh_bal_pos80.tif` (Balance = +80)
+* `set_c_sh_bal_pos90.tif` (Balance = +90)
 * `set_c_sh_bal_pos100.tif` (Balance = +100)
 
 ### 4. Balance Edge Cases (Highlights)
@@ -126,6 +131,9 @@
 * **Midtones Settings:** Hue = 240, Saturation = 100, Luminance = 0.
 * **Adjust:** Global Blending slider.
 * `set_c_sh_blend_0.tif` (Blending = 0)
+* `set_c_sh_blend_5.tif` (Blending = 5)
+* `set_c_sh_blend_10.tif` (Blending = 10)
+* `set_c_sh_blend_15.tif` (Blending = 15)
 * `set_c_sh_blend_25.tif` (Blending = 25)
 * `set_c_sh_blend_75.tif` (Blending = 75)
 * `set_c_sh_blend_100.tif` (Blending = 100)

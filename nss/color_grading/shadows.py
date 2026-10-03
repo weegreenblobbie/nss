@@ -1,85 +1,76 @@
-"""Luminosity Mask Engine for Shadows in Adobe Lightroom Color Grading.
-
-Implements empirical 21-knot quadratic Akima spline interpolation across
-Balance (-100 to +100) and Blending (0 to 100) parameter states.
-"""
-
-from typing import Union
 import numpy as np
 from scipy.interpolate import Akima1DInterpolator
 
-
 class LumaMaskShadows:
-    """Shadows luminosity mask generator based on reverse-engineered Lightroom math."""
+    """
+    High-performance runtime engine for generating Lightroom-compatible Shadows luma masks.
+    
+    Uses a dual-Akima spline architecture:
+    1. Z-Axis Akima: Smoothly interpolates the 21 geometric knots across the UI slider parameter space.
+    2. X-Axis Akima: Maps the final 21 knots to the continuous pixel luminance range.
+    """
 
-    # 21-knot quadratic lattice: x = linspace(0.0, 1.0, 21)**2
-    fixed_x = np.linspace(0.0, 1.0, 21) ** 2
+    FIXED_X = np.array([
+        0.0, 0.0025, 0.01, 0.0225, 0.04, 0.0625, 0.09, 0.1225, 0.16, 0.2025, 
+        0.25, 0.3025, 0.36, 0.4225, 0.49, 0.5625, 0.64, 0.7225, 0.81, 0.9025, 1.0
+    ])
 
-    # Empirical normalized Y-values at fixed_x coordinates
     SHADOWS_BALANCE_KNOTS = {
         -100: [0.0, 0.02728, 0.09806, 0.18073, 0.26325, 0.34323, 0.42642, 0.51267, 0.6006, 0.69237, 0.78502, 0.87371, 0.9515, 0.99426, 0.99344, 0.93309, 0.79248, 0.56346, 0.27986, 0.07615, 0.0],
-        -50: [0.0, 0.03551, 0.12763, 0.23524, 0.34253, 0.44553, 0.55145, 0.65991, 0.76608, 0.87001, 0.96134, 0.99761, 0.98309, 0.89366, 0.72451, 0.50568, 0.30874, 0.20085, 0.11492, 0.03651, 0.0],
-        0: [0.0, 0.04805, 0.17269, 0.31827, 0.46187, 0.5969, 0.73011, 0.86, 0.96686, 0.99899, 0.97119, 0.85142, 0.65784, 0.46045, 0.34036, 0.2804, 0.20917, 0.13466, 0.06741, 0.01867, 0.0],
-        50: [0.0, 0.07198, 0.2576, 0.47259, 0.67588, 0.85075, 0.98069, 0.98367, 0.88748, 0.6922, 0.4911, 0.39551, 0.35281, 0.2969, 0.23503, 0.17374, 0.11745, 0.06942, 0.03244, 0.00832, 0.0],
-        100: [0.0, 0.17557, 0.61475, 0.95879, 0.96183, 0.73153, 0.52341, 0.47727, 0.41754, 0.35053, 0.28394, 0.22292, 0.17154, 0.12882, 0.09352, 0.06438, 0.04126, 0.02335, 0.0101, 0.0021, 0.0],
+        -50:  [0.0, 0.03551, 0.12763, 0.23524, 0.34253, 0.44553, 0.55145, 0.65991, 0.76608, 0.87001, 0.96134, 0.99761, 0.98309, 0.89366, 0.72451, 0.50568, 0.30874, 0.20085, 0.11492, 0.03651, 0.0],
+        0:    [0.0, 0.04805, 0.17269, 0.31827, 0.46187, 0.5969,  0.73011, 0.86,    0.96686, 0.99899, 0.97119, 0.85142, 0.65784, 0.46045, 0.34036, 0.2804,  0.20917, 0.13466, 0.06741, 0.01867, 0.0],
+        25:   [0.0, 0.05771, 0.20652, 0.38182, 0.55061, 0.70715, 0.85135, 0.97764, 0.9969,  0.94772, 0.7979,  0.59034, 0.42247, 0.35489, 0.29894, 0.23307, 0.16461, 0.10093, 0.04849, 0.01293, 0.0],
+        50:   [0.0, 0.07198, 0.2576,  0.47259, 0.67588, 0.85075, 0.98069, 0.98367, 0.88748, 0.6922,  0.4911,  0.39551, 0.35281, 0.2969,  0.23503, 0.17374, 0.11745, 0.06942, 0.03244, 0.00832, 0.0],
+        60:   [0.0, 0.08021, 0.28602, 0.52447, 0.74339, 0.91769, 0.99795, 0.93368, 0.76434, 0.54645, 0.41458, 0.37493, 0.32389, 0.26511, 0.20506, 0.14893, 0.09914, 0.05791, 0.02678, 0.00678, 0.0],
+        70:   [0.0, 0.0919,  0.32771, 0.59467, 0.82929, 0.97516, 0.9823,  0.83273, 0.60641, 0.4409,  0.39645, 0.34814, 0.29092, 0.23199, 0.17575, 0.12557, 0.08262, 0.04786, 0.02193, 0.00538, 0.0],
+        80:   [0.0, 0.10826, 0.38297, 0.6886,  0.92484, 0.99638, 0.89049, 0.66242, 0.4675,  0.41596, 0.36918, 0.31136, 0.25208, 0.19622, 0.14611, 0.10314, 0.06713, 0.03853, 0.01744, 0.00415, 0.0],
+        90:   [0.0, 0.12966, 0.46755, 0.81216, 0.98945, 0.92749, 0.70481, 0.49237, 0.43634, 0.38799, 0.32734, 0.26663, 0.20964, 0.16005, 0.11726, 0.08209, 0.05282, 0.0303,  0.01346, 0.00309, 0.0],
+        100:  [0.0, 0.17557, 0.61475, 0.95879, 0.96183, 0.73153, 0.52341, 0.47727, 0.41754, 0.35053, 0.28394, 0.22292, 0.17154, 0.12882, 0.09352, 0.06438, 0.04126, 0.02335, 0.0101,  0.0021,  0.0],
     }
 
     SHADOWS_BLEND_KNOTS = {
-        0: [0.0, 0.05061, 0.18189, 0.33523, 0.48536, 0.62822, 0.76582, 0.89795, 0.99276, 0.99262, 0.90675, 0.69484, 0.39439, 0.12199, 0.00167, 0.00011, 0.00017, 0.00022, 0.00021, 0.00021, 0.0],
-        25: [0.0, 0.04965, 0.17845, 0.32887, 0.47616, 0.61631, 0.75301, 0.88435, 0.98714, 0.99787, 0.93691, 0.7642, 0.50901, 0.268, 0.14694, 0.11999, 0.08941, 0.0576, 0.0288, 0.00792, 0.0],
-        50: [0.0, 0.04805, 0.17269, 0.31827, 0.46187, 0.5969, 0.73011, 0.86, 0.96686, 0.99899, 0.97119, 0.85142, 0.65784, 0.46045, 0.34036, 0.2804, 0.20917, 0.13466, 0.06741, 0.01867, 0.0],
-        75: [0.0, 0.04233, 0.15426, 0.28554, 0.41831, 0.54688, 0.68131, 0.79626, 0.89991, 0.97887, 0.98349, 0.92848, 0.81978, 0.6886, 0.57673, 0.47681, 0.35555, 0.22856, 0.11428, 0.03178, 0.0],
-        100: [0.0, 0.0336, 0.12403, 0.23287, 0.34378, 0.45464, 0.57575, 0.68821, 0.77366, 0.85961, 0.9345, 0.99033, 0.98595, 0.94005, 0.84317, 0.69768, 0.5191, 0.3325, 0.16576, 0.04597, 0.0],
+        0:   [0.0, 0.05061, 0.18189, 0.33523, 0.48536, 0.62822, 0.76582, 0.89795, 0.99276, 0.99262, 0.90675, 0.69484, 0.39439, 0.12199, 0.00167, 0.00011, 0.00017, 0.00022, 0.00021, 0.00021, 0.0],
+        5:   [0.0, 0.05043, 0.18126, 0.33406, 0.48366, 0.62603, 0.76322, 0.89561, 0.99164, 0.99339, 0.91192, 0.70725, 0.41496, 0.14809, 0.02762, 0.02135, 0.01581, 0.01013, 0.00501, 0.00126, 0.0],
+        10:  [0.0, 0.05027, 0.18067, 0.33297, 0.48209, 0.62398, 0.7618,  0.89311, 0.99076, 0.99481, 0.91803, 0.72044, 0.43681, 0.17582, 0.05514, 0.04395, 0.03276, 0.02107, 0.01052, 0.00282, 0.0],
+        15:  [0.0, 0.05008, 0.17998, 0.3317,  0.48025, 0.6216,  0.75889, 0.88995, 0.98964, 0.99584, 0.92394, 0.73434, 0.45966, 0.20492, 0.08402, 0.06791, 0.05052, 0.03254, 0.01627, 0.0044,  0.0],
+        25:  [0.0, 0.04965, 0.17845, 0.32887, 0.47616, 0.61631, 0.75301, 0.88435, 0.98714, 0.99787, 0.93691, 0.7642,  0.50901, 0.268,   0.14694, 0.11999, 0.08941, 0.0576,  0.0288,  0.00792, 0.0],
+        50:  [0.0, 0.04805, 0.17269, 0.31827, 0.46187, 0.5969,  0.73011, 0.86,    0.96686, 0.99899, 0.97119, 0.85142, 0.65784, 0.46045, 0.34036, 0.2804,  0.20917, 0.13466, 0.06741, 0.01867, 0.0],
+        75:  [0.0, 0.04233, 0.15426, 0.28554, 0.41831, 0.54688, 0.68131, 0.79626, 0.89991, 0.97887, 0.98349, 0.92848, 0.81978, 0.6886,  0.57673, 0.47681, 0.35555, 0.22856, 0.11428, 0.03178, 0.0],
+        100: [0.0, 0.0336,  0.12403, 0.23287, 0.34378, 0.45464, 0.57575, 0.68821, 0.77366, 0.85961, 0.9345,  0.99033, 0.98595, 0.94005, 0.84317, 0.69768, 0.5191,  0.3325,  0.16576, 0.04597, 0.0],
     }
 
-    def _get_slider_knots(self, value: float, knot_dict: dict[Union[int, float], list[float]]) -> np.ndarray:
-        """Interpolate the 21 knot heights for an arbitrary slider position."""
-        keys = sorted(knot_dict.keys())
-        matrix = np.array([knot_dict[k] for k in keys], dtype=np.float64)
-        interpolated = np.array([
-            np.interp(value, keys, matrix[:, j])
-            for j in range(len(self.fixed_x))
-        ], dtype=np.float64)
-        return interpolated
+    def _get_slider_knots(self, value, knot_dict):
+        keys = np.array(sorted(knot_dict.keys()))
+        y_arrays = np.array([knot_dict[k] for k in keys])
+        
+        interpolated_knots = np.zeros(21)
+        for i in range(21):
+            spline_z = Akima1DInterpolator(keys, y_arrays[:, i])
+            interpolated_knots[i] = spline_z(value)
+            
+        return interpolated_knots
 
-    def get_mask(self, luminance_array: np.ndarray, balance: float = 0, blend: float = 50) -> np.ndarray:
-        """Calculate the normalized Shadows mask weights for input luminance.
-
-        Parameters
-        ----------
-        luminance_array : np.ndarray
-            A 2D NumPy array representing normalized luminance in the range [0.0, 1.0].
-            Must satisfy:
-            - Type: np.ndarray
-            - Dimensions: Exactly 2D (ndim == 2, shape: (height, width))
-            - Dtype: np.float32 for performance and precision
-        balance : float, optional
-            Lightroom Balance slider in range [-100, 100]. Default is 0.
-        blend : float, optional
-            Lightroom Blending slider in range [0, 100]. Default is 50.
-
-        Returns
-        -------
-        np.ndarray
-            A 2D NumPy array of shape (height, width) with normalized shadow mask weights
-            clipped to [0.0, 1.0].
+    def get_mask(self, luminance_array, balance=0, blend=50):
+        """
+        Generates the Shadows luma mask for a given image.
+        
+        Args:
+            luminance_array (np.ndarray): 2D array of the image's grayscale pixel values.
+                Must be strictly 2D and dtype np.float32, normalized to [0.0, 1.0].
+            balance (float): UI Balance slider [-100 to 100].
+            blend (float): UI Blending slider [0 to 100].
         """
         assert isinstance(luminance_array, np.ndarray), "luminance_array must be a numpy array"
-        assert luminance_array.ndim == 2, f"luminance_array must be a 2D array, got ndim={luminance_array.ndim}"
-        assert luminance_array.dtype == np.float32, (
-            f"luminance_array must be np.float32 for performance, got {luminance_array.dtype}"
-        )
+        assert luminance_array.ndim == 2, "luminance_array must be a 2D array"
+        assert luminance_array.dtype == np.float32, "luminance_array must be np.float32 for performance"
 
-        # 1. Get interpolated 21-knot arrays for the requested UI states
         base_y = np.array(self.SHADOWS_BALANCE_KNOTS[0])
         bal_y = self._get_slider_knots(balance, self.SHADOWS_BALANCE_KNOTS)
         blend_y = self._get_slider_knots(blend, self.SHADOWS_BLEND_KNOTS)
-
-        # 2. Additive Delta Combination (Clamp 0.0 to 1.0)
+        
         final_y = np.clip(base_y + (bal_y - base_y) + (blend_y - base_y), 0.0, 1.0)
-
-        # 3. Generate Akima Spline and evaluate pixels
-        spline = Akima1DInterpolator(self.fixed_x, final_y)
-
-        # 4. Map the normalized luminance image to mask weights
-        return spline(luminance_array)
+        
+        spline = Akima1DInterpolator(self.FIXED_X, final_y)
+        mask = spline(luminance_array)
+        
+        return np.clip(mask, 0.0, 1.0)
