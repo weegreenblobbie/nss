@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import Akima1DInterpolator, CloughTocher2DInterpolator
 
 
-class LumaMaskShadows:
+class Shadows:
     """
     High-performance runtime engine for generating Lightroom-compatible Shadows luma masks.
     
@@ -79,3 +79,4 @@ class LumaMaskShadows:
         mask = spline(luminance_array)
         
         return np.clip(mask, 0.0, 1.0)
+
