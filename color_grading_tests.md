@@ -154,31 +154,74 @@
 
 ### Group 1: The Balance Sweep (Blending = 50)
 Lock Blending at 50, and sweep the Balance slider from -100 to +100.
-- [ ] `set_c_hi_bal_neg100.tif` (Balance: -100, Blend: 50)
-- [ ] `set_c_hi_bal_neg75.tif`  (Balance: -75, Blend: 50)
-- [ ] `set_c_hi_bal_neg50.tif`  (Balance: -50, Blend: 50)
-- [ ] `set_c_hi_bal_neg25.tif`  (Balance: -25, Blend: 50)
-- [ ] `set_c_hi_bal_0.tif`      (Balance: 0, Blend: 50) *(Base State)*
-- [ ] `set_c_hi_bal_pos25.tif`  (Balance: +25, Blend: 50)
-- [ ] `set_c_hi_bal_pos50.tif`  (Balance: +50, Blend: 50)
-- [ ] `set_c_hi_bal_pos75.tif`  (Balance: +75, Blend: 50)
-- [ ] `set_c_hi_bal_pos100.tif` (Balance: +100, Blend: 50)
+-  `set_c_hi_bal_neg100.tif` (Balance: -100, Blend: 50)
+-  `set_c_hi_bal_neg75.tif`  (Balance: -75, Blend: 50)
+-  `set_c_hi_bal_neg50.tif`  (Balance: -50, Blend: 50)
+-  `set_c_hi_bal_neg25.tif`  (Balance: -25, Blend: 50)
+-  `set_c_hi_bal_0.tif`      (Balance: 0, Blend: 50) *(Base State)*
+-  `set_c_hi_bal_pos25.tif`  (Balance: +25, Blend: 50)
+-  `set_c_hi_bal_pos50.tif`  (Balance: +50, Blend: 50)
+-  `set_c_hi_bal_pos75.tif`  (Balance: +75, Blend: 50)
+-  `set_c_hi_bal_pos100.tif` (Balance: +100, Blend: 50)
 
 ### Group 2: The Blending Sweep (Balance = 0)
 Return Balance to 0, and sweep the Blending slider.
-- [ ] `set_c_hi_blend_0.tif`    (Balance: 0, Blend: 0)
-- [ ] `set_c_hi_blend_10.tif`   (Balance: 0, Blend: 10)
-- [ ] `set_c_hi_blend_25.tif`   (Balance: 0, Blend: 25)
-- [ ] `set_c_hi_blend_75.tif`   (Balance: 0, Blend: 75)
-- [ ] `set_c_hi_blend_90.tif`   (Balance: 0, Blend: 90)
-- [ ] `set_c_hi_blend_100.tif`  (Balance: 0, Blend: 100)
+-  `set_c_hi_blend_0.tif`    (Balance: 0, Blend: 0)
+-  `set_c_hi_blend_10.tif`   (Balance: 0, Blend: 10)
+-  `set_c_hi_blend_25.tif`   (Balance: 0, Blend: 25)
+-  `set_c_hi_blend_75.tif`   (Balance: 0, Blend: 75)
+-  `set_c_hi_blend_90.tif`   (Balance: 0, Blend: 90)
+-  `set_c_hi_blend_100.tif`  (Balance: 0, Blend: 100)
 
 ### Group 3: The 4 Corners (2D Perimeter)
 Push both sliders to their absolute extremes to define the bounds of the Delaunay triangulation.
-- [ ] `set_c_hi_bal_neg100_blend_0.tif`   (Balance: -100, Blend: 0)
-- [ ] `set_c_hi_bal_neg100_blend_100.tif` (Balance: -100, Blend: 100)
-- [ ] `set_c_hi_bal_pos100_blend_0.tif`   (Balance: +100, Blend: 0)
-- [ ] `set_c_hi_bal_pos100_blend_100.tif` (Balance: +100, Blend: 100)
+-  `set_c_hi_bal_neg100_blend_0.tif`   (Balance: -100, Blend: 0)
+-  `set_c_hi_bal_neg100_blend_100.tif` (Balance: -100, Blend: 100)
+-  `set_c_hi_bal_pos100_blend_0.tif`   (Balance: +100, Blend: 0)
+-  `set_c_hi_bal_pos100_blend_100.tif` (Balance: +100, Blend: 100)
+
+## Phase 3: Midtones Mask Extraction (19-File Batch)
+
+**Global Lightroom Settings for this Batch:**
+*   **Base Image:** Linear grayscale gradient (0 to 255)
+*   **Shadows:** OFF (Hue 0, Sat 0, Lum 0)
+*   **Highlights:** OFF (Hue 0, Sat 0, Lum 0)
+*   **Midtones Hue:** `240` (Blue - our clip-free measuring stick)
+*   **Midtones Saturation:** `100`
+*   **Midtones Luminance:** `0`
+*   **Export Format:** 16-bit TIFF (Uncompressed)
+*   **Destination:** `tests/test_data/`
+
+*Note: The prefix `set_c_mid_` stands for Set C, Midtones.*
+
+### Group 1: The Balance Sweep (Blending = 50)
+Lock Blending at 50, and sweep the Balance slider from -100 to +100.
+-  `set_c_mid_bal_neg100.tif` (Balance: -100, Blend: 50)
+-  `set_c_mid_bal_neg75.tif`  (Balance: -75, Blend: 50)
+-  `set_c_mid_bal_neg50.tif`  (Balance: -50, Blend: 50)
+-  `set_c_mid_bal_neg25.tif`  (Balance: -25, Blend: 50)
+-  `set_c_mid_bal_0.tif`      (Balance: 0, Blend: 50) *(Base State)*
+-  `set_c_mid_bal_pos25.tif`  (Balance: +25, Blend: 50)
+-  `set_c_mid_bal_pos50.tif`  (Balance: +50, Blend: 50)
+-  `set_c_mid_bal_pos75.tif`  (Balance: +75, Blend: 50)
+-  `set_c_mid_bal_pos100.tif` (Balance: +100, Blend: 50)
+
+### Group 2: The Blending Sweep (Balance = 0)
+Return Balance to 0, and sweep the Blending slider.
+-  `set_c_mid_blend_0.tif`    (Balance: 0, Blend: 0)
+-  `set_c_mid_blend_10.tif`   (Balance: 0, Blend: 10)
+-  `set_c_mid_blend_25.tif`   (Balance: 0, Blend: 25)
+-  `set_c_mid_blend_75.tif`   (Balance: 0, Blend: 75)
+-  `set_c_mid_blend_90.tif`   (Balance: 0, Blend: 90)
+-  `set_c_mid_blend_100.tif`  (Balance: 0, Blend: 100)
+
+### Group 3: The 4 Corners (2D Perimeter)
+Push both sliders to their absolute extremes to define the bounds of the Delaunay triangulation.
+-  `set_c_mid_bal_neg100_blend_0.tif`   (Balance: -100, Blend: 0)
+-  `set_c_mid_bal_neg100_blend_100.tif` (Balance: -100, Blend: 100)
+-  `set_c_mid_bal_pos100_blend_0.tif`   (Balance: +100, Blend: 0)
+-  `set_c_mid_bal_pos100_blend_100.tif` (Balance: +100, Blend: 100)
+
 
 ---
 

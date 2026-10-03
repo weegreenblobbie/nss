@@ -77,8 +77,3 @@ class Highlights:
         mask = spline(luminance_array)
         
         return np.clip(mask, 0.0, 1.0)
-
-
-# Backward-compatibility aliases
-HighlightsEngine = Highlights
-LumaMaskHighlights = Highlights
