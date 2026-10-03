@@ -6,29 +6,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from nss.color_grading.math import rgb_to_lab_pure
 from nss.color_grading.shadows import LumaMaskShadows
-
-
-def rgb_to_lab_pure(rgb_img: np.ndarray) -> np.ndarray:
-    rgb = rgb_img.astype(np.float64) / 65535.0
-    mask = rgb > 0.04045
-    rgb[mask] = ((rgb[mask] + 0.055) / 1.055) ** 2.4
-    rgb[~mask] = rgb[~mask] / 12.92
-    matrix = np.array([
-        [0.4124564, 0.3575761, 0.1804375],
-        [0.2126729, 0.7151522, 0.0721750],
-        [0.0193339, 0.1191920, 0.9503041],
-    ])
-    xyz = np.dot(rgb, matrix.T)
-    xyz /= np.array([0.95047, 1.00000, 1.08883])
-    mask = xyz > 0.008856
-    f_xyz = np.empty_like(xyz)
-    f_xyz[mask] = np.cbrt(xyz[mask])
-    f_xyz[~mask] = (7.787 * xyz[~mask]) + (16.0 / 116.0)
-    L = (116.0 * f_xyz[:, :, 1]) - 16.0
-    a = 500.0 * (f_xyz[:, :, 0] - f_xyz[:, :, 1])
-    b = 200.0 * (f_xyz[:, :, 1] - f_xyz[:, :, 2])
-    return np.stack([L, a, b], axis=-1)
 
 
 def test_assertion_1d_array_raises():
@@ -156,7 +135,7 @@ def test_engine_shadows_lightroom_validation():
     plt.tight_layout()
 
     out_paths = [
-        "tests/test_data/engine_shadows_validation.png",
+        "tests/test_data/nss_color_grading_shadows_test.png",
     ]
     for p in out_paths:
         try:
@@ -171,6 +150,92 @@ def test_engine_shadows_lightroom_validation():
         pct = rmse / 655.35
         print(f"  {name:30s} -> RMSE: {rmse:6.1f} DN ({pct:5.2f}% error)")
     print("=================================================================\n")
+
+
+def test_blind_off_grid_validation():
+    """Blind off-grid validation against unseen Lightroom parameter states."""
+    import sys
+
+    input_path = "tests/test_data/input_synthetic.tif"
+    if not os.path.exists(input_path):
+        input_path = "/workspace/tests/test_data/input_synthetic.tif"
+
+    im_in = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
+    orig_rgb = im_in[100:101, :, ::-1]
+    orig_lab = rgb_to_lab_pure(orig_rgb)
+    luminance_array = np.linspace(0.0, 1.0, 2048, dtype=np.float32).reshape(1, -1)
+
+    engine = LumaMaskShadows()
+
+    test_cases = [
+        ("val_sh_bal_neg33_blend_63.tif", -33, 63),
+        ("val_sh_bal_pos42_blend_18.tif", 42, 18),
+        ("val_sh_bal_pos86_blend_91.tif", 86, 91),
+    ]
+
+    colors = ["#1E88E5", "#FB8C00", "#D81B60"]
+    fig, axes = plt.subplots(3, 1, figsize=(11, 13), sharex=True)
+    results = []
+
+    for idx, (filename, bal, blend) in enumerate(test_cases):
+        fpath = os.path.join("tests/test_data", filename)
+        if not os.path.exists(fpath):
+            fpath = os.path.join("/workspace/tests/test_data", filename)
+
+        im_val = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
+        test_rgb = im_val[100:101, :, ::-1]
+        test_lab = rgb_to_lab_pure(test_rgb)
+        delta_b = np.abs(test_lab[0, :, 2] - orig_lab[0, :, 2])
+        ground_truth = delta_b / np.max(delta_b)
+
+        engine_mask = engine.get_mask(luminance_array, balance=bal, blend=blend)[0]
+        rmse_16bit = np.sqrt(np.mean((ground_truth - engine_mask) ** 2)) * 65535.0
+        results.append((filename, bal, blend, rmse_16bit))
+
+        ax = axes[idx]
+        x_axis = luminance_array[0]
+        ax.plot(x_axis, ground_truth, color=colors[idx], linewidth=2.2, linestyle="-", label="Ground Truth (Lightroom)")
+        ax.plot(x_axis, engine_mask, color="black", linewidth=1.8, linestyle="--", label="Engine (LumaMaskShadows)")
+        ax.set_title(
+            f"Blind Test: Bal {bal:+d}, Blend {blend:d} ({filename}) — RMSE: {rmse_16bit:.1f} DN ({rmse_16bit / 655.35:.2f}% error)",
+            fontsize=11,
+            fontweight="bold",
+        )
+        ax.set_ylabel("Normalized Mask [0, 1]", fontsize=10)
+        ax.set_ylim(-0.05, 1.08)
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(loc="upper right", fontsize=10)
+
+    axes[-1].set_xlabel("Relative Input Luminance (0.0 = Black, 1.0 = White)", fontsize=11)
+    axes[-1].set_xlim(0.0, 1.0)
+    plt.tight_layout()
+
+    out_paths = [
+        "tests/test_data/nss_color_grading_shadows_test_validation.png",
+        "/workspace/tests/test_data/nss_color_grading_shadows_test_validation.png",
+        "/workspace/nss_color_grading_shadows_test_validation.png",
+        "/home/ubuntu/.gemini/antigravity-cli/brain/15b4b398-4b8f-443b-ae9f-5358cfa63f07/nss_color_grading_shadows_test_validation.png",
+    ]
+    for p in out_paths:
+        try:
+            fig.savefig(p, dpi=150)
+        except Exception:
+            pass
+
+    plt.close(fig)
+
+    # Print a Markdown table of the results to sys.stdout
+    md_table = [
+        "\n### Blind Off-Grid Validation Results\n",
+        "| File | Balance | Blending | 16-bit DN RMSE | Relative Error |",
+        "|:---|:---:|:---:|:---:|:---:|",
+    ]
+    for filename, bal, blend, rmse in results:
+        err_pct = rmse / 655.35
+        md_table.append(f"| `{filename}` | {bal:+d} | {blend:d} | **{rmse:.1f} DN** | **{err_pct:.2f}%** |")
+    md_output = "\n".join(md_table) + "\n"
+    sys.stdout.write(md_output)
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":
@@ -189,3 +254,5 @@ if __name__ == "__main__":
     print("  ✓ Valid 2D array execution passed")
     print("\nRunning Lightroom synthetic validation...")
     test_engine_shadows_lightroom_validation()
+    print("\nRunning Blind Off-Grid validation...")
+    test_blind_off_grid_validation()
