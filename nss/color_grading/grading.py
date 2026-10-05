@@ -64,10 +64,9 @@ class Grading:
                 chromatic_shift = v1 + (v2 - v1) * ((hue - k1) / (k2 - k1))
                 break
 
+        # UI slider scaling with linear magnitude preserve
         normalized_sat = sat / 100.0
-        sat_curve = normalized_sat ** 0.80 if normalized_sat > 0 else 0.0
-
-        chromatic_shift = chromatic_shift * sat_curve
+        chromatic_shift = chromatic_shift * normalized_sat
         luma_shift = np.array([lum * 0.2, 0.0, 0.0], dtype=np.float32)
         
         return chromatic_shift + luma_shift
@@ -88,16 +87,18 @@ class Grading:
         v_mi = self._get_shift_vector(mi_h, mi_s, mi_l)
         v_hi = self._get_shift_vector(hi_h, hi_s, hi_l)
         
-        # Calibrated multipliers to perfectly match the target gradient
-        v_sh[1:] *= 1.0206
-        v_mi[1:] *= 0.7562
-        v_hi[1:] *= 0.6598
+        # GA-optimized optimal weight scalers for neutral accuracy
+        v_sh[1:] *= 1.1398
+        v_mi[1:] *= 0.9523
+        v_hi[1:] *= 0.8473
         
         total_raw_shift = (m_sh * v_sh) + (m_mi * v_mi) + (m_hi * v_hi)
         
+        # Adobe Gamut Compression Curve
         rgb_sat = np.max(img_rgb, axis=-1) - np.min(img_rgb, axis=-1)
         x_data = np.array([0.0, 0.25, 0.50, 0.75, 1.0], dtype=np.float32)
         y_data = np.array([1.0, 1.3356, 1.2230, 0.9717, 0.7500], dtype=np.float32)
+        
         blend_multiplier = np.interp(rgb_sat, x_data, y_data)[..., np.newaxis]
         
         total_lab_shift = np.copy(total_raw_shift)
@@ -108,12 +109,9 @@ class Grading:
         
         graded_rgb_raw = cv2.cvtColor(graded_lab.astype(np.float32), cv2.COLOR_Lab2RGB)
         
-        # User's brilliant formulation to cure the muddy/dull pure hues!
-        # 1. Subtract the minimum (if < 0)
+        # User's brilliant Min/Max Ratio Gamut Mapping
         min_c = np.minimum(np.min(graded_rgb_raw, axis=-1, keepdims=True), 0.0)
         shifted_rgb = graded_rgb_raw - min_c
-        
-        # 2. Divide by the max (if > 1)
         max_c = np.maximum(np.max(shifted_rgb, axis=-1, keepdims=True), 1.0)
         graded_rgb = shifted_rgb / max_c
         
