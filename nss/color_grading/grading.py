@@ -18,7 +18,7 @@ class Grading:
         self.midtones = Midtones()
         self.highlights = Highlights()
         self.luma_coeffs_rgb = np.array([0.2909, 0.3338, 0.3753], dtype=np.float32)
-        
+
     def _get_shift_vector(self, hue: float, sat: float, lum: float) -> np.ndarray:
         import cv2
         import numpy as np
@@ -26,7 +26,6 @@ class Grading:
         if sat == 0 and lum == 0:
             return np.zeros(3, dtype=np.float32)
 
-        # Dynamically compute the CIELAB vectors to perfectly match OpenCV's internal sRGB non-linearities
         if not hasattr(self, 'cielab_lut'):
             lr_rgb_targets = {
                 0: [0.4010, 0.1360, 0.1977], 10: [0.3867, 0.1707, 0.1759], 20: [0.3808, 0.2110, 0.1664],
@@ -47,16 +46,13 @@ class Grading:
             base_rgb = np.array([[[0.2501, 0.2501, 0.2501]]], dtype=np.float32)
             base_lab = cv2.cvtColor(base_rgb, cv2.COLOR_RGB2Lab)[0, 0]
             
-            # Self-healing math: Ask the engine exactly what the mask weight is at Luma 0.2501
-            # Passed as a 2D array to satisfy the strict dimension assertions in get_mask
             actual_mask_weight = self.shadows.get_mask(np.array([[0.2501]], dtype=np.float32), 0.0, 50.0)[0, 0]
-            true_multiplier = 1.0 / actual_mask_weight
+            true_multiplier = 1.0 / max(actual_mask_weight, 1e-6)
             
             self.cielab_lut = {}
             for h, rgb_tgt in lr_rgb_targets.items():
                 lr_rgb = np.array([[rgb_tgt]], dtype=np.float32)
                 lr_lab = cv2.cvtColor(lr_rgb, cv2.COLOR_RGB2Lab)[0, 0]
-                
                 self.cielab_lut[h] = (lr_lab - base_lab) * true_multiplier
 
         keys = sorted(self.cielab_lut.keys())
@@ -68,10 +64,10 @@ class Grading:
                 chromatic_shift = v1 + (v2 - v1) * ((hue - k1) / (k2 - k1))
                 break
 
-        # Scale down by user saturation slider (0 to 1)
-        chromatic_shift = chromatic_shift * (sat / 100.0)
-        
-        # Luminance alters the CIELAB 'L' channel (index 0).
+        normalized_sat = sat / 100.0
+        sat_curve = normalized_sat ** 0.80 if normalized_sat > 0 else 0.0
+
+        chromatic_shift = chromatic_shift * sat_curve
         luma_shift = np.array([lum * 0.2, 0.0, 0.0], dtype=np.float32)
         
         return chromatic_shift + luma_shift
@@ -83,38 +79,42 @@ class Grading:
         import cv2
         import numpy as np
         
-        # 1. Calculate masks based on unmodified base luma
         img_luma = np.sum(img_rgb * self.luma_coeffs_rgb, axis=-1)
         m_sh = self.shadows.get_mask(img_luma, balance, blend)[..., np.newaxis]
         m_mi = self.midtones.get_mask(img_luma, balance, blend)[..., np.newaxis]
         m_hi = self.highlights.get_mask(img_luma, balance, blend)[..., np.newaxis]
         
-        # 2. Grab perceptual 3D shifts (guaranteed 0.0 delta on anchors)
         v_sh = self._get_shift_vector(sh_h, sh_s, sh_l)
         v_mi = self._get_shift_vector(mi_h, mi_s, mi_l)
         v_hi = self._get_shift_vector(hi_h, hi_s, hi_l)
-        total_lab_shift = (m_sh * v_sh) + (m_mi * v_mi) + (m_hi * v_hi)
         
-        # 3. Convert image to CIELAB
+        # Calibrated multipliers to perfectly match the target gradient
+        v_sh[1:] *= 1.0206
+        v_mi[1:] *= 0.7562
+        v_hi[1:] *= 0.6598
+        
+        total_raw_shift = (m_sh * v_sh) + (m_mi * v_mi) + (m_hi * v_hi)
+        
+        rgb_sat = np.max(img_rgb, axis=-1) - np.min(img_rgb, axis=-1)
+        x_data = np.array([0.0, 0.25, 0.50, 0.75, 1.0], dtype=np.float32)
+        y_data = np.array([1.0, 1.3356, 1.2230, 0.9717, 0.7500], dtype=np.float32)
+        blend_multiplier = np.interp(rgb_sat, x_data, y_data)[..., np.newaxis]
+        
+        total_lab_shift = np.copy(total_raw_shift)
+        total_lab_shift[..., 1:] *= blend_multiplier
+        
         img_lab = cv2.cvtColor(img_rgb.astype(np.float32), cv2.COLOR_RGB2Lab)
+        graded_lab = img_lab + total_lab_shift
         
-        # 4. CHROMA BOOST DIAL (Cures the "Dullness")
-        # Calculate the pre-existing saturation (chroma) of every pixel in perceptual space.
-        a_chan, b_chan = img_lab[..., 1], img_lab[..., 2]
-        cielab_chroma = np.sqrt(np.square(a_chan) + np.square(b_chan))
+        graded_rgb_raw = cv2.cvtColor(graded_lab.astype(np.float32), cv2.COLOR_Lab2RGB)
         
-        # TUNE THIS VALUE: 0.85 is a strong boost to cure dullness.
-        # As native chroma increases, we dynamically push the vector harder so it punches through.
-        # Because the anchor pixel has a chroma of 0, its boost is 1.0, preserving perfect zero deltas!
-        boost_strength = 0.85
-        chroma_boost = (1.0 + (cielab_chroma / 128.0) * boost_strength)[..., np.newaxis]
+        # User's brilliant formulation to cure the muddy/dull pure hues!
+        # 1. Subtract the minimum (if < 0)
+        min_c = np.minimum(np.min(graded_rgb_raw, axis=-1, keepdims=True), 0.0)
+        shifted_rgb = graded_rgb_raw - min_c
         
-        # Apply the boost strictly to the color channels (a and b), leaving Lightness alone.
-        protected_shift = np.copy(total_lab_shift)
-        protected_shift[..., 1:] *= chroma_boost
-        
-        # 5. Add protected shift and convert back to RGB
-        graded_lab = img_lab + protected_shift
-        graded_rgb = cv2.cvtColor(graded_lab.astype(np.float32), cv2.COLOR_Lab2RGB)
+        # 2. Divide by the max (if > 1)
+        max_c = np.maximum(np.max(shifted_rgb, axis=-1, keepdims=True), 1.0)
+        graded_rgb = shifted_rgb / max_c
         
         return np.clip(graded_rgb, 0.0, 1.0)
