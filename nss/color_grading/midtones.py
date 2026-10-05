@@ -72,6 +72,7 @@ class Midtones:
         spline = Akima1DInterpolator(self.FIXED_X, final_y)
         
         # 3. Map the normalized luminance image array through the spline
-        mask = spline(luminance_array)
+        luma_clamped = np.clip(luminance_array, 0.0, 1.0)
+        mask = spline(luma_clamped)
         
-        return np.clip(mask, 0.0, 1.0)
+        return np.clip(mask, 0.0, 1.0).astype(np.float32)
