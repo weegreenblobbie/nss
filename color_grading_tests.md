@@ -345,3 +345,44 @@ Push both sliders to their absolute extremes to define the bounds of the Delauna
   * Shadows: Hue = 352, Saturation = 71, Luminance = -44
   * Midtones: Hue = 350, Saturation = 41, Luminance = +96
   * Highlights: Hue = 28, Saturation = 29, Luminance = -92
+
+## Phase 3.1: Color Application & Blending Math (16-File Batch)
+
+**Global Lightroom Settings for this Batch:**
+*   **Base Image:** `synthetic_v2.tif` (We will analyze the 0.50 Gray Midtone Anchor Patch)
+*   **Global Balance:** `0`
+*   **Global Blending:** `50`
+*   **Shadows Wheel:** OFF (Sat 0, Lum 0)
+*   **Highlights Wheel:** OFF (Sat 0, Lum 0)
+*   **Midtones Wheel:** *Active (See values below)*
+*   **Destination:** `tests/test_data/`
+
+*Note: The sweep parameter (the value changing between exports) is always at the end of the filename.*
+
+### Group 1: The Saturation Scale (Luminance Slider = 0)
+We will inject Pure Red (0°), Pure Green (120°), and Pure Blue (240°) at 4 different saturation levels.
+
+**Red (Hue 0):**
+- [ ] `set_d_color_h0_l0_s25.tif`   (Midtones: Hue 0, Lum 0, Sat 25)
+- [ ] `set_d_color_h0_l0_s50.tif`   (Midtones: Hue 0, Lum 0, Sat 50)
+- [ ] `set_d_color_h0_l0_s75.tif`   (Midtones: Hue 0, Lum 0, Sat 75)
+- [ ] `set_d_color_h0_l0_s100.tif`  (Midtones: Hue 0, Lum 0, Sat 100)
+
+**Green (Hue 120):**
+- [ ] `set_d_color_h120_l0_s25.tif`  (Midtones: Hue 120, Lum 0, Sat 25)
+- [ ] `set_d_color_h120_l0_s50.tif`  (Midtones: Hue 120, Lum 0, Sat 50)
+- [ ] `set_d_color_h120_l0_s75.tif`  (Midtones: Hue 120, Lum 0, Sat 75)
+- [ ] `set_d_color_h120_l0_s100.tif` (Midtones: Hue 120, Lum 0, Sat 100)
+
+**Blue (Hue 240):**
+- [ ] `set_d_color_h240_l0_s25.tif`  (Midtones: Hue 240, Lum 0, Sat 25)
+- [ ] `set_d_color_h240_l0_s50.tif`  (Midtones: Hue 240, Lum 0, Sat 50)
+- [ ] `set_d_color_h240_l0_s75.tif`  (Midtones: Hue 240, Lum 0, Sat 75)
+- [ ] `set_d_color_h240_l0_s100.tif` (Midtones: Hue 240, Lum 0, Sat 100)
+
+### Group 2: The Luminance Slider Mechanics
+We lock Hue to Blue (240°) and Saturation to 50, and sweep the Luminance slider.
+- [ ] `set_d_color_h240_s50_lneg100.tif` (Midtones: Hue 240, Sat 50, Lum -100)
+- [ ] `set_d_color_h240_s50_lneg50.tif`  (Midtones: Hue 240, Sat 50, Lum -50)
+- [ ] `set_d_color_h240_s50_lpos50.tif`  (Midtones: Hue 240, Sat 50, Lum +50)
+- [ ] `set_d_color_h240_s50_lpos100.tif` (Midtones: Hue 240, Sat 50, Lum +100)
