@@ -1,8 +1,18 @@
-# Make sure you apt install python3-tk first!
-ipython
-pillow
-matplotlib
-numpy
-scipy
-scikit-image
-tifffile
+# UI Framework
+PyQt6>=6.5.0
+
+# Image handling and math
+numpy>=1.24.0
+scipy>=1.10.0
+tifffile>=2023.7.10
+opencv-python-headless>=4.8.0
+
+# Additional dependencies for existing scripts
+matplotlib>=3.7.0
+pillow>=10.0.0
+scikit-image>=0.21.0
+pybind11>=2.11.0
+setuptools>=68.0.0
+ipython>=8.14.0
+
+pytest

@@ -1,5 +1,28 @@
 # Nick's Star Stacker
 
+# Setting up the virtual environment
+
+```
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+# Building the pybind11 module
+
+```
+python build.py build_ext --build-lib nss --inplace
+```
+
+# Center the moon or sun tiff
+```
+python -m nss.center src\path\20250313_232842.99.tif -o centered\20250313_232842.99.tif
+
+python -m nss.center "D:\tmp_export\eclipse-2024\20240408_134044.79-Enhanced-NR.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_134044.79-Enhanced-NR.tif"
+python -m nss.center -p "D:\tmp_export\eclipse-2024\20240408_134010.84.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_134010.84.tif"
+python -m nss.center -p "D:\tmp_export\eclipse-2024\20240408_132133.04.tif" -o "D:\tmp_export\eclipse-2024\centered\20240408_132133.04.tif"
+```
+
 # Example Usage
 
 Make a python virtual env and install the requirements.
@@ -9,16 +32,17 @@ These examples are in **windows powershell** format:
 Align one TIFF against the target:
 
 ```
-python align.py -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
-                   "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232746.99.tif"
+python -m nss.align_moon.py `
+    -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
+       "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232746.99.tif"
 ```
 
-Align multiple TIFFs against the target:
+Align multiple TIFFs against the target using python's multiprocessing:
 ```
-python align.py -t TARGET_TIF TIFF+
+python nss.py -t TARGET_TIF TIFF+
 ```
 
-Align a bunch of files using python multiprocessing:
+For example:
 ```
 python nss.py -t "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\20250313_232842.99.tif" `
                  "C:\Users\weegr\Desktop\tmp_export\20250313\tiff-raw-totality-1\*.tif"
@@ -54,6 +78,8 @@ Given a sequence of exposures that are:
 ## Step 1, picking a target image, all other images are aligned to it
 
 ## Step 2. Invoke the program specifying the target and list of images to align
+
+TODO: Update for MOON processing.
 
 ## Step 3. Perform an exhaustive parameter search
 

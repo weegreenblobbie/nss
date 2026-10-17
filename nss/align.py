@@ -39,14 +39,14 @@ The algorithm
 
 step 1 - coarse parameter search
 
-The frist step is the do exhustive alignments with patches on a very coarse
+The first step is the do exhaustive alignments with patches on a very coarse
 grid between the source image and the target.  These parameters are stored and
-used for the next step as starting paramters
+used for the next step as starting parameters
 
 set 2 - fine patch alignment
 
 Given the coarse grid parameters, break the src image into small patches and
-peform a gradient asscent search for best fit, start the search with the
+perform a gradient ascent search for best fit, start the search with the
 coarse parameters at the starting location
 '''
 
@@ -94,7 +94,7 @@ def main():
         "--cache",
         default = None,
         type = str,
-        help = "Reads a previously computed coarse aligment cache file."
+        help = "Reads a previously computed coarse alignment cache file."
     )
 
     parser.add_argument(
@@ -102,14 +102,20 @@ def main():
         "--target",
         required = True,
         type = str,
-        help = "specifes the target image that all other images are alinged to"
+        help = "Specifies the target image that all other images are aligned to"
     )
 
     parser.add_argument(
         "-m",
         "--mask",
         type = str,
-        help = "specifes the mask image, pixels that are black are ignored during processing"
+        help = "Specifies the mask image, pixels that are black are ignored during processing"
+    )
+
+    parser.add_argument(
+        "--moon",
+        action = "store_true",
+        help = "Optimize processing for moon images"
     )
 
     parser.add_argument(
@@ -117,7 +123,7 @@ def main():
         "--output",
         type = str,
         default = None,
-        help = "specifes the aligned output image name, default is {prefix}-aligned.tiff"
+        help = "Specifies the aligned output image name, default is {prefix}-aligned.tiff"
     )
 
     parser.add_argument(
@@ -126,6 +132,14 @@ def main():
         action = "store_true",
         default = False,
         help = "plot a summary at the end"
+    )
+
+    parser.add_argument(
+        "-r",
+        "--radius",
+        default = RADIUS,
+        type = int,
+        help = "The patch radius to use for alignment"
     )
 
     parser.add_argument(
@@ -197,7 +211,8 @@ def main():
                 target,
                 source,
                 mask,
-                60,
+                args.radius,
+                moon=args.moon,
             )
 
             if args.save_cache:
@@ -208,7 +223,7 @@ def main():
 
         print_param_cache(param_cache)
 
-    radius = RADIUS
+    radius = args.radius
 
     with timeit("Aligning images\n"):
         target, source, aligned = align_images(
@@ -288,25 +303,6 @@ def imresize(array, scale):
         f"output array dtype changed by imresize! ({in_dtype} != {out.dtype})"
 
     return out.astype(in_dtype)
-
-
-def imshow(array):
-
-    peak = np.nanmax(array)
-
-    if peak < 1.0:
-        peak = 1.0
-
-    # gray scale
-    if array.ndim == 2:
-        plt.imshow(array / peak, cmap = 'gray', interpolation='nearest')
-
-    # color
-    elif array.ndim == 3:
-        plt.imshow(array / peak, interpolation='nearest')
-
-    else:
-        raise RuntimeError("don't know how to handle array with shape %s" % repr(array.shape))
 
 
 def align_images(target, source, mask, radius, param_cache):
@@ -586,7 +582,34 @@ def gradient_ascent(
     return patch, best
 
 
-def coarse_align_param_search(target, source, mask, patch_radius):
+def plot_patches(data, windows, show=True, title="windows"):
+
+    data = np.array(data)
+    data[np.isnan(data)] = 0.0
+    data **= 0.5
+    black = "black"
+    white = "white"
+    red = "red"
+
+    plt.figure(facecolor=black, figsize=(16,8))
+    plt.title(title, color=white)
+    ax = plt.gca()
+    imshow(data)
+
+    for win in windows:
+        m0, n0 = win["pos"]
+        size = win["size"]
+        rect = plt.Rectangle((m0, n0), size, size, ls='-', color=white, fill=False)
+        ax.add_patch(rect)
+        ax.text(m0, n0 + size/2.0, f"%.3f" % win["score"], color=red)
+
+    if show:
+        plt.show()
+
+
+def coarse_align_param_search(target, source, mask, patch_radius, **kwargs):
+
+    moon = kwargs.get("moon", False)
 
     param_cache = dict()
 
@@ -622,6 +645,9 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     #-------------------------------------------------------------------------
     # Perform searches in windows with maximum deltas.
 
+    src = np.sqrt(np.array(source_gray))
+    src -= np.nanmean(src)
+    
     candidates = []
 
     for m in range(0, M - patch_radius, patch_radius):
@@ -633,13 +659,27 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             n0 = n
             n1 = n0 + patch_width
 
-            p = source_gray[m0 : m1, n0 : n1]
+            p = np.array(src[m0 : m1, n0 : n1])
 
-            delta = np.nanmax(p) - np.nanmin(p)
+            pixel_range = np.nanmax(p) - np.nanmin(p)
+            if moon:
+                # Boost the score of patches based on the sum of the
+                # pixels in the patch, this should favor patches including
+                # parts the moon rather than patches with only stars.
+                score = pixel_range * np.nansum(p.flatten())
+            else:
+                score = pixel_range
 
-            candidates.append(dict(delta=delta, pos=(m,n)))
+            candidates.append(dict(score=score, pos=(m,n), size=patch_width))
 
-    candidates = sorted(candidates, key = lambda x: x['delta'], reverse = True)
+    candidates = sorted(candidates, key = lambda x: x["score"], reverse = True)
+
+    # Normalize the scores.
+    max_score = max(candidates[0]["score"], 1.0)
+    print(f"Max score before normalizing: {max_score}")
+
+    for can in candidates:
+        can["score"] /= max_score
 
     #-------------------------------------------------------------------------
     # Downsample the candidate so they they are at least 2 radii away.
@@ -647,12 +687,14 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     sparse_candidates = [ candidates[0] ]
 
     for can in candidates[1:]:
+        score = can["score"]
+        if moon:
+            if score < 0.10:
+                continue
+        elif score < 0.50:
+            continue
 
-        can_pos = can['pos']
-
-        p = can['delta'] / sparse_candidates[0]['delta']
-
-        if p < 0.50: continue
+        can_pos = can["pos"]
 
         distances = []
 
@@ -665,8 +707,10 @@ def coarse_align_param_search(target, source, mask, patch_radius):
                 )
             )
 
-        if np.min(distances) > 4 * patch_radius:
+        if np.min(distances) > 3 * patch_radius:
             sparse_candidates.append(can)
+
+    # plot_patches(source_gray, sparse_candidates)
 
     #-------------------------------------------------------------------------
     # Now take the top N windows.
@@ -688,29 +732,13 @@ def coarse_align_param_search(target, source, mask, patch_radius):
 
     candidates = sparse_candidates[0:num_windows]
 
+    num_windows = len(candidates)
+
     #-------------------------------------------------------------------------
     # Plot target patches that will be aligned with src patches.
-    if False:
 
-        array = np.ones(target.shape)
-        array += source_gray
-
-        invalid = np.isnan(target)
-
-        array[invalid] = 0.0
-
-        for can in candidates:
-            m0, n0 = can['pos']
-            m1 = m0 + patch_width
-            n1 = n0 + patch_width
-            array[m0 : m1, n0 : n1] += 100.0
-
-        plt.figure()
-        imshow(array)
-        plt.title("coarse param search windows")
-
-        plt.show()
-        xxxxxxx
+    #plot_patches(source, candidates, title="coarse param search windows")
+    #xxxxxxx
 
     #--------------------------------------------------------------------------
     # slide patches around the corse window locations
@@ -724,6 +752,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     count = 0
     max_count = num_windows * window_iterations * (random_walk_iterations + gradient_assent_iterations)
 
+    log(f"    patchpatch_width_size = {patch_width}\n")
     log(f"    num_windows = {num_windows}\n")
     log(f"    num_iterations = {max_count}\n")
     log( "    coarse param search: %5.1f%%" % 0.0)
@@ -746,7 +775,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             angle = 0.0
             walk_scores = []
 
-            # Randomally walk.
+            # Randomly walk.
             for j in range(random_walk_iterations):
 
                 rm = np.random.choice([-1, 0, 1])
@@ -805,7 +834,7 @@ def coarse_align_param_search(target, source, mask, patch_radius):
             )
 
         if score > 1.0001 or score < -1.0001:
-            # Debug if we get scores ourside what isn't possible.
+            # Debug if we get scores outside what isn't possible.
 
             log("Score {} is outside what I thought was possible: +/- 1.0".format(s))
             log("Throwing up some debug plots")
@@ -844,558 +873,6 @@ def coarse_align_param_search(target, source, mask, patch_radius):
     return param_cache
 
 
-class RegScore(object):
-    '''
-    A class to hold the registration score along with registration parameters
-    so they can be tracked together.
-    '''
-
-    def __init__(self, score, src_pos, tgt_pos, angle):
-        self.score = score
-        self.src_pos = src_pos
-        self.tgt_pos = tgt_pos
-        self.heading = (src_pos[0] - tgt_pos[0], src_pos[1] - tgt_pos[1])
-        self.angle = angle
-
-
-    def __lt__(self, rhs):
-        return self.score < rhs.score
-
-
-    def __gt__(self, rhs):
-        return self.score > rhs.score
-
-
-    def __ge__(self, rhs):
-        return self.score >= rhs.score
-
-    def __str__(self):
-        return "score=%.3f, src_pos=%s, tgt_pos=%s, heading=%s, angle=%s" % (
-            self.score,
-            self.src_pos,
-            self.tgt_pos,
-            self.heading,
-            self.angle,
-        )
-
-
-
-class Patch(object):
-    '''
-    A patch is a square sub image taking out of the source image.  It is scored
-    using a cross correlation of the overlapping pixels.
-
-    This class copies the source image in RGB, after the final translation
-    and rotation is found, the RGB pixles are given to the Stacker class to be
-    written to the final aligned image.
-    '''
-
-
-    def __init__(self, rgb, src_pos):
-
-        assert \
-            rgb.ndim == 3, \
-            "Error, expecting patch to be a color image, got shape = %s" % \
-                repr(rgb.shape)
-
-        self._rgb = np.array(rgb)
-        self._gray = to_gray(rgb)
-        self._gray[np.isnan(self._gray)] = 0.0
-        self._cache = dict()
-        self._src_pos = src_pos
-        self._tgt_pos = None
-        self._angle = None
-        self._heading = None
-
-        self._rotate_kwargs = dict(
-            reshape = False,
-            mode = 'constant',
-            cval = np.nan
-        )
-
-        self.shape = self._gray.shape
-
-
-    def color_array(self):
-        return self._rgb
-
-
-    def tgt_pos(self):
-        '''
-        Returns the final target position
-        '''
-
-        assert self._tgt_pos is not None, "oops, patch._tgt_pos is None"
-
-        return self._tgt_pos
-
-
-    def set_final_params(self, angle, tgt_pos):
-
-        assert self._tgt_pos is None, "oops, patch._tgt_pos is already set"
-
-        self._tgt_pos = tgt_pos
-        self._angle = angle
-
-        # rotate each color channel
-
-        invalid = np.isnan(self._rgb[:,:,0])
-
-        for ax in range(self._rgb.shape[2]):
-
-            array = self._rgb[:,:, ax]
-
-            # rotation is implemented in terms a an image interpolation, so
-            # any nans will propagte, so must turn them into zeros
-
-            array[invalid] = 0.0
-
-            array = ndimage.rotate(array, angle, **self._rotate_kwargs)
-
-            self._rgb[:,:, ax] = array
-
-
-    def rotate(self, angle):
-
-        key = int(angle * 1000)
-
-        if key in self._cache:
-            return self._cache[key]
-
-        # cache miss
-
-        if key == 0:
-            return self._gray
-
-        p = ndimage.rotate(self._gray, angle, **self._rotate_kwargs)
-
-        self._cache[key] = p
-
-        return p
-
-
-    def score(self, tgt, tgt_pos, angle = 0.0):
-
-        assert \
-            tgt.ndim == 2, \
-            "Error, expecting target array to be gray scale, (shape = %s)" % \
-                repr(tgt.shape)
-
-        H, W = tgt.shape  # height and width of target image aligning to
-
-        size = self._gray.shape[0]  # size of the patch
-
-        m, n = tgt_pos # upper left corner on target image
-
-        assert m >= 0, f"invalid m: {m}"
-        assert n >= 0, f"invalid n: {n}"
-
-        # compute indices into target image and limit at image boundary
-
-        m0 = m
-        m1 = m0 + size
-
-        n0 = n
-        n1 = n0 + size
-
-        if m0 < 0:
-            m0 = 0
-            m1 = size
-
-        if m1 > H:
-            m1 = H
-            m0 = m1 - size
-
-        if n0 < 0:
-            n0 = 0
-            n1 = size
-
-        if n1 > W:
-            n1 = W
-            n0 = n1 - size
-
-        # extract patch from target
-
-        t = tgt[m0 : m1, n0 : n1]
-
-        # rotate the patch to angle
-
-        p = self.rotate(angle)
-
-        assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}, {m0}:{m1},{n0}:{n1}, (tgt.shape: {tgt.shape})"
-
-        score = xcorr_score(p, t)
-
-        if False:
-            plt.figure()
-            imshow(p)
-            plt.title('patch')
-            plt.figure()
-            imshow(t)
-            plt.title('target (score=%f)' % score)
-            plt.show()
-
-        return RegScore(score, self._src_pos, tgt_pos, angle)
-
-    def plot(self, title):
-        plt.figure()
-        imshow(self._gray)
-        plt.title(title)
-        plt.show()
-
-
-
-class Aligned(object):
-    '''
-    This class stores an empty RGB image on construction.  The algorithms take
-    pactches and align them to the reference images, then the patches are given
-    to this class and the rgb values are copied out of the patch and stored.
-
-    This class can be pickled to disk and the resulting tiff can also be saved.
-    '''
-
-
-    def __init__(self, shape):
-        assert len(shape) >= 2
-        self._rgb = np.nan * np.ones(shape, np.float32)
-        self._count = np.ones(shape[0:2], np.float32)
-
-
-    def add_patch(self, patch):
-
-        array = patch.color_array()
-
-        M, N = array.shape[0:2]
-
-        m, n = patch.tgt_pos() # upper left corner of patch
-
-        target = self._rgb[m : m + M, n : n + N, :]
-
-        # Only write out pixels that are not NaN, rotating patches introduce
-        # NaNs.
-
-        valid = ~np.isnan(array)
-
-        target[valid] = array[valid]
-
-        target = self._count[m : m + M, n : n + N]
-
-        target[valid[:,:,0]] += 1.0
-
-
-    def get_rgb(self):
-
-        rgb = np.array(self._rgb)
-
-        return rgb
-
-
-    def pickle(self, filename):
-
-        d = dict(
-            rgb = self._rgb,
-            count = self._count,
-        )
-
-        with open(filename, 'wb') as fd:
-            pickle.dump(d, fd)
-
-        print("wrote %s" % filename)
-
-
-    def savetiff(self, filename, resize = 1.0):
-
-        rgb = self.get_rgb()
-
-        rgb -= np.nanmin(rgb)
-        rgb /= np.nanmax(rgb)
-
-#~        invalid = np.isnan(rgb)
-
-#~        rgb[invalid] = 0.0
-
-#~        rgb = imresize(rgb, resize)
-
-        # Convert float32 (0.0 to 1.0) to uint16.
-
-        rgb *= (1 << 16) - 1
-
-        rgb = rgb.astype(np.uint16)
-
-        rgb = unpad_array(rgb, RADIUS)
-
-        imwrite(filename, rgb, photometric = 'rgb')
-
-
-    @classmethod
-    def from_pickle(cls, filename):
-
-        with open(filename, 'rb') as fd:
-            d = pickle.load(fd)
-
-        obj = cls(d['rgb'].shape)
-
-        obj._rgb = d['rgb']
-        obj._count = d['count']
-
-        print("read %s" % filename)
-
-        return obj
-
-
-class timeit(object):
-
-    def __init__(self, msg=None):
-        if msg:
-            log(msg)
-
-    def __enter__(self):
-        self.d0 = datetime.datetime.now()
-
-    def __exit__(self, *args):
-        delta = datetime.datetime.now() - self.d0
-        total_seconds = delta.total_seconds()
-        if total_seconds > 60.0:
-            delta = str(delta)
-        else:
-            delta = "%.2f seconds" % total_seconds
-        log(f"took {delta}\n")
-
-
-def to_gray(rgb):
-
-    assert rgb.ndim == 3, "oops, expecting color image, got shape %s" % repr(rgb.shape)
-
-    #return np.sqrt(rgb[...,0] ** 2 + rgb[...,1] ** 2 + rgb[...,2] ** 2)
-
-    # Luminance in the Adobe Color colorspace
-    #     https://community.adobe.com/t5/photoshop-ecosystem-discussions/how-to-measure-true-luminosity-of-a-color-sample-by-script/td-p/12094302
-    return 0.29999 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.1131 * rgb[..., 2]
-
-
-def log(msg):
-
-    sys.stdout.write(msg)
-    sys.stdout.flush()
-
-
-def zscore(array, valid):
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', r'Mean of empty slice')
-        warnings.filterwarnings('ignore', r'Degrees of freedom <= 0 for slice')
-        warnings.filterwarnings('ignore', r'invalid value encountered in true_divide')
-
-        array = np.array(array)
-
-        array[~valid] = np.nan
-
-        mu = np.nanmean(array)
-        sig = np.nanstd(array)
-
-        if np.isnan(mu) or np.isnan(sig):
-            return np.zeros_like(array)
-
-        out = (array - mu) / sig
-
-        return out
-
-
-def pad_array(array, radius):
-
-    if array.ndim == 2:
-        return _pad_array_2d(array, radius)
-
-    else:
-        return _pad_array_3d(array, radius)
-
-
-def _pad_array_2d(array, radius):
-
-    M, N = array.shape
-
-    out = np.nan * np.ones((M + 2 * radius, N + 2 * radius), array.dtype)
-
-    out[radius : radius + M, radius : radius + N] = array
-
-    return out
-
-
-def _pad_array_3d(array, radius):
-
-    M, N, O = array.shape
-
-    out = np.nan * np.ones((M + 2 * radius, N + 2 * radius, O), array.dtype)
-
-    out[radius : radius + M, radius : radius + N, :] = array
-
-    return out
-
-
-def unpad_array(array, radius):
-
-    if array.ndim == 2:
-        return _unpad_array_2d(array, radius)
-
-    else:
-        return _unpad_array_3d(array, radius)
-
-
-def _unpad_array_2d(array, radius):
-
-    M, N = array.shape
-
-    return array[
-        radius : radius + M - 2 * radius,
-        radius : radius + N - 2 * radius
-    ]
-
-
-def _unpad_array_3d(array, radius):
-
-    M, N, _ = array.shape
-
-    return array[
-        radius : radius + M - 2 * radius,
-        radius : radius + N - 2 * radius,
-        :
-    ]
-
-
-def param_cache_resize(param_cache, s):
-
-    out = dict()
-
-    for k,v in param_cache.items():
-
-        new_k = (int(k[0] * s), int(k[1] * s))
-        new_v = dict(
-            heading = (int(v['heading'][0] * s), int(v['heading'][1] * s)),
-            angle = v['angle'],
-            score = v['score'],
-        )
-
-        out[new_k] = new_v
-
-    return out
-
-
-def cache_lookup(param_cache, pos):
-
-    keys = list(param_cache.keys())
-
-    if not keys:
-        return dict(heading=[0,0], angle=0.0)
-
-    dist = np.zeros((len(keys)),np.float32)
-
-    for i in range(len(keys)):
-
-        loc = keys[i]
-
-        dist[i] = np.sqrt((loc[0] - pos[0])**2 + (loc[1] - pos[1])**2)
-
-    k = keys[dist.argmin()]
-
-    return param_cache[k]
-
-
-def print_param_cache(param_cache):
-
-    print("param_cache:")
-
-    keys = sorted(list(param_cache.keys()))
-
-    for k in keys:
-
-        v = param_cache[k]
-
-        print(
-            "    (%5d,%4d): score %.3f heading (%3d,%3d) angle %7.3f" % (
-                k[0],
-                k[1],
-                v['score'],
-                v['heading'][0],
-                v['heading'][1],
-                v['angle']
-            )
-        )
-
-
-def xcorr_score(p, t):
-    '''
-    xcorr that deals with nans.
-
-    The patch and target arrays are z-scored which scales each image in units of
-    standard deviation.  This way, we are comparing the shapes in the images and
-    relative scaling doesn't matter.
-
-    score = average(patch * target)
-
-    When shapes match well, the score approaches 1.0, when they mismatch they
-    approach 0, and if they match exactly opposite, approach -1.0.
-    '''
-
-    assert p.shape == t.shape, f"shape mismatch: {p.shape} != {t.shape}"
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', r'Mean of empty slice')
-        warnings.filterwarnings('ignore', r'invalid value encountered in less')
-
-        valid = ~np.isnan(p) * ~np.isnan(t)
-
-        p = zscore(p, valid)
-        t = zscore(t, valid)
-
-        s = np.nanmean(p * t)
-
-        if np.isnan(s) or np.isinf(s):
-            return 0.0
-
-        # deweight scores as the number of valid pixels drops off
-
-        valid_count = np.sum(valid.astype(np.int32))
-
-        if valid_count == 0:
-            return 0.0
-
-        weight = float(valid_count) / p.size
-
-        if weight < 0.50:
-            weight *= 2.0
-
-        s *= weight
-
-        if s > 1.0001 or s < -1.0001:
-
-            print("Score {} out of bounds".format(s))
-            print("valid_count = %s" % (repr(valid_count)))
-            print("weight = %s" % (repr(weight)))
-            print("s = %s" % (repr(s)))
-
-            plt.figure()
-            imshow(p)
-            plt.title('p (%s, %s)' % (np.nanmin(p), np.nanmax(p)))
-
-            plt.figure()
-            imshow(t)
-            plt.title('t (%s, %s)' % (np.nanmin(t), np.nanmax(t)))
-
-            tmp = p * t
-
-            plt.figure()
-            imshow(tmp)
-            plt.title('p*t (%s, %s)' % (np.nanmin(tmp), np.nanmax(tmp)))
-
-            plt.show()
-
-            raise RuntimeError(
-                "score %s is outside expected range (-1 : 1)" % s
-            )
-
-        s = np.sign(s) * (s**2)
-
-    return s
 
 
 if __name__ == "__main__":
