@@ -9,8 +9,8 @@ return {
   moonLauncher = [[C:\users\weegr\code\nss\plugin\nss_moon.bat]],
   moonWorkFolderName = 'nss_moon',  -- inside Lightroom's temp folder
   -- defaults of the Plug-in Manager's Moon settings (Settings.lua)
-  moonChunkSize = 10,               -- photos exported and measured at a time; each full-size TIFF of an 8256 x 5504 photo is about 270 MB
-  moonWorkers = 2,                  -- photos measured at the same time, each in its own process of about 1 GB
+  moonChunkSize = 16,               -- photos exported and measured at a time; each full-size TIFF of an 8256 x 5504 photo is about 270 MB
+  moonWorkers = 8,                  -- photos measured at the same time, each in its own process of about 1 GB
   moonSize = 121,                   -- detect_moon grid size in pixels of the full-size export
   moonMinConfidence = 0.9,          -- share of the edge points on the fitted circle below which a photo is skipped (moon not found)
   verifyTolerance = 1.0,            -- pixels; verify flags a moon centre further than this from the crop centre

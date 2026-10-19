@@ -70,10 +70,10 @@ below) and are untested.
   crop and shows how far the moon's centre is from the crop's centre (under
   1 px when centering worked).
 * Settings: File > Plug-in Manager > nss, section **Moon**:
-  * **Photos per chunk** (default 10): both menu items export and measure this
+  * **Photos per chunk** (default 16): both menu items export and measure this
     many photos at a time and delete each chunk's TIFFs once measured, so
     the temp folder holds one chunk at most (about 270 MB per photo).
-  * **Worker processes** (default 2): photos measured at the same time, each
+  * **Worker processes** (default 8): photos measured at the same time, each
     in its own Python process of about 1 GB of memory.
 
   The defaults are in `Config.lua`.
