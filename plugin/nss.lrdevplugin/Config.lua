@@ -4,4 +4,14 @@
 return {
   launcher = [[C:\users\weegr\code\nss\plugin\nss_color.bat]],
   workFolderName = 'nss_color',     -- inside Lightroom's temp folder
+  -- Moon: Center / Moon: Verify centering: `moonLauncher` is run as  moonLauncher "<request file>"  (see nss_moon.bat) and exits 0 once the
+  -- result file is written.
+  moonLauncher = [[C:\users\weegr\code\nss\plugin\nss_moon.bat]],
+  moonWorkFolderName = 'nss_moon',  -- inside Lightroom's temp folder
+  -- defaults of the Plug-in Manager's Moon settings (Settings.lua)
+  moonChunkSize = 16,               -- photos exported and measured at a time; each full-size TIFF of an 8256 x 5504 photo is about 270 MB
+  moonWorkers = 8,                  -- photos measured at the same time, each in its own process of about 1 GB
+  moonSize = 121,                   -- detect_moon grid size in pixels of the full-size export
+  moonMinConfidence = 0.9,          -- share of the edge points on the fitted circle below which a photo is skipped (moon not found)
+  verifyTolerance = 1.0,            -- pixels; verify flags a moon centre further than this from the crop centre
 }

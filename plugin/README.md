@@ -1,7 +1,9 @@
-# plugin - Lightroom Classic plug-in for nss.Color
+# plugin - Lightroom Classic plug-in `nss` (nss.Color and moon centering)
 
-Opens the selected Lightroom Classic photo in the nss.Color GUI (`color.py`)
-and writes the GUI's Color Mixer and Color Grading values back to the photo.
+The plug-in **nss** has two parts.  **Color** opens the selected Lightroom
+Classic photo in the nss.Color GUI (`color.py`) and writes its Color Mixer and
+Color Grading values back to the photo.  **Moon** crops photos so the moon is
+centred (see Center the moon).
 
 **Only tested on Windows** (Lightroom Classic 15.6).  The launcher is a Windows
 batch file; other platforms would need their own launcher script (see Configure
@@ -10,11 +12,13 @@ below) and are untested.
 ## Files
 
 * `nss.lrdevplugin/` - the plug-in folder you add to Lightroom (`Info.lua`,
-  `Config.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`).
+  `Config.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`,
+  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`).
 * `nss_color.bat` - the launcher Lightroom runs: starts
   `color.py --lightroom <request file>` with the repo's `venv` Python.
-* `lr_bridge.py` - reads the request file and writes the result file on the
-  Python side (format in its docstring).
+* `nss_moon.bat` - the moon launcher: starts `moon.py --request <request file>`.
+* `lr_bridge.py`, `moon_bridge.py` - read the request file and write the result
+  file on the Python side (formats in their docstrings).
 
 ## Install
 
@@ -27,21 +31,20 @@ below) and are untested.
 
    Check that `venv\Scripts\python color.py` opens the GUI.
 
-2. **Configure the paths.**  Both files contain the author's repo path
+2. **Configure the paths.**  These files contain the author's repo path
    (`C:\users\weegr\code\nss`); change it to your clone:
-   * `nss_color.bat`: the `cd /d ...` line and the path to
+   * `nss_color.bat` and `nss_moon.bat`: the `cd /d ...` line and the path to
      `venv\scripts\python.exe`.
-   * `nss.lrdevplugin\Config.lua`: `launcher`, the full path of
-     `nss_color.bat`.
+   * `nss.lrdevplugin\Config.lua`: `launcher` and `moonLauncher`, the full
+     paths of `nss_color.bat` and `nss_moon.bat`.
 
 3. **Add the plug-in to Lightroom Classic.**  File > Plug-in Manager > Add,
-   select the `plugin\nss.lrdevplugin` folder, and check that `nss.Color` is
+   select the `plugin\nss.lrdevplugin` folder, and check that `nss` is
    listed as installed and running.
 
 ## Use
 
-1. Select one photo and choose Library > Plug-in Extras > **Edit with
-   nss.Color**.
+1. Select one photo and choose Library > Plug-in Extras > **Color: Edit...**.
 2. The plug-in exports a 16-bit Adobe RGB TIFF with the Color Mixer and Color
    Grading set to neutral (everything else baked in) into Lightroom's temp
    folder (`nss_color`), then puts the photo's values back.  The GUI opens with
@@ -50,14 +53,46 @@ below) and are untested.
    are applied to the photo as one undo step, `nss.Color`.  Closing the window
    without Apply leaves the photo unchanged.
 
+## Center the moon
+
+* Library > Plug-in Extras > **Moon: Center** crops the selected
+  photos so the moon's centre is the crop's centre.  The photos are exported at
+  full size and full frame, `moon.py` finds the moon
+  (`nss.utils.detect_moon`) and the new crop is applied as one undo step
+  per photo.  One photo keeps its crop size if it fits, else gets the largest
+  crop of its aspect; several photos get one common crop size in pixels (the
+  first photo's aspect) so they line up when stacked.  A crop angle is kept:
+  the crop is turned about its centre and sized so its corners stay inside the
+  photo.  No dialog: the offset corrected per photo and the skipped ones with
+  the reason are written to `Documents\nss_color_trace.txt`, which each run of
+  Moon: Center starts afresh.
+* **Moon: Verify centering** exports the photos with their current
+  crop and shows how far the moon's centre is from the crop's centre (under
+  1 px when centering worked).
+* Settings: File > Plug-in Manager > nss, section **Moon**:
+  * **Photos per chunk** (default 16): both menu items export and measure this
+    many photos at a time and delete each chunk's TIFFs once measured, so
+    the temp folder holds one chunk at most (about 270 MB per photo).
+  * **Worker processes** (default 8): photos measured at the same time, each
+    in its own Python process of about 1 GB of memory.
+
+  The defaults are in `Config.lua`.
+* The progress bar covers the export, the measuring and the applying; cancel
+  stops after the current photo.  Canceled before the crops are applied,
+  Moon: Center changes no photo; while they are applied, the photos done so far
+  keep their new crop.
+* `python moon.py a.tif b.tif --debug` prints the findings and writes
+  `a_moon.png` overlays (circle, centre, crop) to check the detection by eye.
+
 ## Troubleshooting
 
-* `Documents\nss_color_bat.txt` - what the launcher and the GUI printed, and
-  the exit code.
-* `Documents\nss_color_trace.txt` - the plug-in's steps (export, command run,
-  result).
+* `Documents\nss_color_bat.txt`, `Documents\nss_moon_bat.txt` - what the
+  launchers printed, and the exit code.
+* `Documents\nss_color_trace.txt` - the plug-in's steps and Moon: Center's
+  results (export, command run, result); Moon: Center empties it first, the
+  other menu items append.
 * "Unknown develop settings": your Lightroom names a setting differently.  Run
-  Library > Plug-in Extras > **nss.Color: write develop settings to the log**,
+  Library > Plug-in Extras > **Color: Write develop settings to the log**,
   which writes every setting of the selected photo to
   `Documents\nss_develop_settings.txt`, and correct the names in
   `nss.lrdevplugin\Keys.lua` (and `WHEEL_KEYS` / `MIXER` in `lr_bridge.py`).

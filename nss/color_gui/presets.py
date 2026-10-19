@@ -5,7 +5,7 @@ keys are ignored.
 """
 import json
 
-from nss.color_math import StateNode, create_default_state
+from nss.color_explore.state import StateNode, create_default_state
 
 VERSION = 1
 
@@ -20,7 +20,7 @@ def state_from_preset(preset: dict) -> StateNode:
     state = create_default_state()
     for k, v in preset.get("state", {}).items():
         if k in state:
-            state[k] = v if k == "harmony_mode" else float(v)
+            state[k] = float(v)
     return state
 
 

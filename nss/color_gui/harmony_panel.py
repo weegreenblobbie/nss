@@ -6,7 +6,7 @@ Coordinates: the wheel angle is the Color Grading wheel's angle (wheel_lut: 0 at
 nss.color_mixer.hue_remap) sits at angle g(h), the angle whose Lightroom rim colour has the screen hue of h (MIXER_TO_WHEEL).  The mixer's hue
 mapping f becomes F = g . f . g^-1 on wheel angles (wheel_remap_lut); angle a is painted with the grading wheel's colour at F(a), so with neutral
 sliders the wheel is the Color Grading wheel.  A sample's marker sits at g(input hue) and never moves with the sliders.  The wedges are target
-OUTPUT angles, drawn at the angles F maps into them (nss.color_harmony.wedge_arcs), so a sample is in harmony when its marker lies inside a drawn wedge.
+OUTPUT angles, drawn at the angles F maps into them (nss.color_explore.harmony.wedge_arcs), so a sample is in harmony when its marker lies inside a drawn wedge.
 """
 import math
 from typing import Callable, List, NamedTuple, Optional, Tuple
@@ -19,7 +19,7 @@ from PyQt6.QtGui import (QBrush, QColor, QContextMenuEvent, QIcon, QImage, QKeyS
 from PyQt6.QtWidgets import (QComboBox, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMenu, QPushButton, QSlider, QToolButton, QVBoxLayout,
                              QWidget)
 
-from nss.color_harmony import HARMONY_MODES, ROTATION_STEP, best_rotation, in_wedge, nearest_wedge, wedge_arcs
+from nss.color_explore.harmony import HARMONY_MODES, ROTATION_STEP, best_rotation, in_wedge, nearest_wedge, wedge_arcs
 from nss.color_mixer.hue_remap import hue_remap_forward, hue_remap_lut
 from nss.color_mixer.mixer import hsv_to_rgb
 from nss.color_gui.mixer_panel import LINEAR_PROPHOTO, PROBE_SAT, PROBE_VALUE, RIM_HUES, screen_hue

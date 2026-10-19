@@ -4,7 +4,7 @@ A desktop application that grades 16-bit TIFF images with the Lightroom Color Gr
 with the wheels or explores color harmonies through a 3x3 image grid.  Start it with `python color.py` from the repo root.
 
 This package is the view layer only: no image maths lives here.  The grade itself is `nss.color_grading.Grading.apply`; the State Node type,
-its defaults and the harmony / mutation generators are in `nss/color_math.py`.
+its defaults, the colour harmony maths and Random Shift are in `nss/color_explore` (`state.py`, `harmony.py`, `random_shift.py`).
 
 ## Data pipeline
 
@@ -21,8 +21,8 @@ Preserving the 16-bit data is the highest priority.
 ## State and undo
 
 * Parameter-based state: a State Node is a dictionary of settings (`shadow_hue`, `shadow_sat` 0..1, `shadow_light` -1..1, the same for
-  `midtone_*`, `highlight_*`, `global_*`, plus `blending` 0..1, `balance` -1..1, `rotation` in degrees, `harmony_mode`).  Never store images in
-  history.
+  `midtone_*`, `highlight_*`, `global_*`, plus `blending` 0..1, `balance` -1..1, `rotation` in degrees, and the mixer's `mixer_hue` /
+  `mixer_sat` / `mixer_lum`).  Never store images in history.
 * `state_manager.py` keeps undo/redo stacks of snapshots gathered from the registered widgets (each has a unique `STATE_KEY`).  Snapshots are
   pushed on discrete actions (slider release, wheel release, reset, preset load); keys missing from older snapshots take their defaults.
 * `grading_state.py` maps a State Node to `Grading.apply` arguments (sat / light x100, blending x100, balance x100); Rotation is added to every
@@ -61,7 +61,7 @@ All wheel geometry and painting lives in `wheel_lut.py` (one place to change it)
 ## Random Shift and Explore Mode
 
 Random Shift moves the sliders at random toward the Color Harmony samples (harmony modes are chosen only in Color Harmony).  The maths is
-`random_shift` in `nss/color_math.py`; strength = Variation Strength / 100 (default 5%), every r is uniform in [-1, 1].
+`random_shift` in `nss/color_explore/random_shift.py`; strength = Variation Strength / 100 (default 5%), every r is uniform in [-1, 1].
 
 * **Mixer** (checkbox): each band's weight is the largest, over the samples, of its band weight at the sample's mixer hue
   (`bands.slider_at`), damped for grey or dark displayed colours (HSV sat and value below 0.1); its Hue, Sat and Lum get r * strength * 100 * weight.
@@ -75,7 +75,7 @@ Random Shift moves the sliders at random toward the Color Harmony samples (harmo
 ## Color Harmony
 
 Checks sampled image colours against harmony wedges and shows how the Color Mixer's Hue sliders move them.  The maths is outside this package:
-`nss.color_mixer.hue_remap` (the mixer's hue mapping f as a 360-point table and its inverse) and `nss.color_harmony` (modes, best fit, wedges).
+`nss.color_mixer.hue_remap` (the mixer's hue mapping f as a 360-point table and its inverse) and `nss.color_explore.harmony` (modes, best fit, wedges).
 
 * **Wheel axis** is the Color Grading wheel's angle.  A mixer hue h (hexagon hue of linear ProPhoto) sits at g(h), the angle whose rim colour
   has the same screen hue (`MIXER_TO_WHEEL`, the match `band_color` makes, interpolated).  The mixer's hue mapping f (re-measured on every Hue
@@ -85,7 +85,7 @@ Checks sampled image colours against harmony wedges and shows how the Color Mixe
   the displayed preview; the input hue is read from the pre-mixer proxy at the same pixel, because the grade after the mixer also moves hues.
   Each sample appears as a circle on the preview, a marker outside the wheel rim and a patch in the 2 x 8 grid; left click opens the info popup
   (original and current colour), right click offers Remove.
-* **Wedges** are target OUTPUT wheel angles (`HARMONY_MODES` in `nss/color_harmony.py`), drawn at the angles F maps into them (several arcs where
+* **Wedges** are target OUTPUT wheel angles (`HARMONY_MODES` in `nss/color_explore/harmony.py`), drawn at the angles F maps into them (several arcs where
   F folds over).  A sample whose marker lies inside its nearest wedge is in harmony; otherwise an arrow points to that wedge's nearest edge.
 * Choosing a mode fits the Wedge Rotation (0.5 degree grid search) to the samples' current output angles; the slider then rotates all wedges.
 * Snapshot key `color_harmony`: samples, mode, rotation (the eyedropper state is not saved).  Reset Harmony never touches the mixer; opening a

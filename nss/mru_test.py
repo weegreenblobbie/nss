@@ -1,3 +1,4 @@
+"""Tests of nss.mru: the recent-directories list, with QSettings replaced by an in-memory store."""
 import os
 import pytest
 from unittest.mock import patch
