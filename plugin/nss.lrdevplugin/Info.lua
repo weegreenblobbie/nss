@@ -2,10 +2,13 @@ return {
   LrSdkVersion = 6.0,
   LrSdkMinimumVersion = 6.0,
   LrToolkitIdentifier = 'com.nss.color',
-  LrPluginName = 'nss.Color',
+  LrPluginName = 'nss',
   LrLibraryMenuItems = {
-    { title = 'Edit with nss.Color', file = 'EditWithNss.lua' },
-    { title = 'nss.Color: write develop settings to the log', file = 'DumpSettings.lua' },
+    { title = 'Color: Edit...', file = 'EditWithNss.lua' },
+    { title = 'Color: Write develop settings to the log', file = 'DumpSettings.lua' },
+    { title = 'Moon: Center', file = 'CenterMoon.lua' },
+    { title = 'Moon: Verify centering', file = 'VerifyMoon.lua' },
   },
+  LrPluginInfoProvider = 'PluginInfoProvider.lua',
   VERSION = { major = 1, minor = 0, revision = 0 },
 }

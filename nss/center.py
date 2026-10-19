@@ -114,8 +114,8 @@ def main():
         print(f"    Source: {source_fn}")
 
     with utils.timeit("Detecting moon in source: "):
-        source_circle = utils.detect_moon(source.array, args.size, plot=args.plot)
-        print(f"Source: {source_circle}")
+        source_circle, confidence = utils.detect_moon(source.array, args.size, plot=args.plot)
+        print(f"Source: {source_circle}, confidence {confidence:.3f}")
         if args.plot:
             plt.title("Source Image")
             plt.show()

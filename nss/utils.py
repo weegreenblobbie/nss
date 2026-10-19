@@ -1,15 +1,29 @@
 from dataclasses import dataclass
 import datetime
+import importlib
 import pickle
 import sys
 import warnings
 
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy.ndimage
-import scipy.special
-from scipy.signal import convolve2d
+import scipy            # its submodules (scipy.ndimage, scipy.signal) load on first use
+
+
+class _ImportedOnFirstUse:
+    """A module imported at its first attribute use.  Plotting is never needed by detect_moon, so matplotlib stays out of the start-up of
+    the processes that only find moons (moon.py's workers start about a second sooner each)."""
+
+    def __init__(self, name: str) -> None:
+        """Remembers the module name; nothing is imported yet."""
+        self._name = name
+
+    def __getattr__(self, attribute: str) -> object:
+        """The module's attribute, importing the module the first time (later imports are a dictionary lookup)."""
+        return getattr(importlib.import_module(self._name), attribute)
+
+
+plt = _ImportedOnFirstUse("matplotlib.pyplot")
 
 try:
     # pybind11 squash function.
@@ -146,7 +160,7 @@ def generate_test_image(image_shape=(1600,2400), num_stars_min=16, num_stars_max
         n = np.random.randint(0, N)
         out[m,n] = 4.0
 
-    out = convolve2d(out, g, mode="same", boundary="symm")
+    out = scipy.signal.convolve2d(out, g, mode="same", boundary="symm")
 
     # Add some noise.
     out += np.random.uniform(0.0, 0.15, (M,N))
@@ -361,76 +375,69 @@ def fit_circle(points):
     return center_x, center_y, radius
 
 
-def detect_moon(image, grid_size=200, plot=False):
-    """
-    Detect the center and radius of the moon located in the image.
+BOX_SCORE_MIN = 0.3         # share of the best box score a box needs to be an edge candidate; 0.6 left the dim side of an eclipsed moon out,
+                            # so the circle rested on a short bright arc and moved up to 6 px with the grid position (0.3: under 0.1 px)
+BOX_Z_MAX = 5.0             # robust z-score of a box's distance from the median box centre above which the box is dropped (a star far from the moon)
+BOX_RESIDUAL_MAX = 3.0      # pixels; boxes whose points lie further from the fitted circle (median) are dropped one at a time, worst first
+EDGE_TOLERANCE = 3.0        # pixels; an edge point this close to the final circle counts towards the confidence
+MIN_BOXES = 3               # fewer boxes left than this: no circle
 
-    Args:
-        image (numpy.ndarray): The input image array.
 
-        grid_size (int): The size of the grid patches used to detect the moon's
-                         edge.
-    Returns:
-        m, n, r (float): The detected moon's center and radius.
-    """
-    assert image.dtype == np.float32
-    sobel = sobel_edge_detection(to_gray(image))
-
+def moon_edge_boxes(image: np.ndarray, grid_size: int) -> list[tuple[tuple[int, int], np.ndarray]]:
+    """(origin (row, col), edge points (k, 2) as (row, col)) of each candidate grid box: boxes of grid_size + 1 pixels every grid_size // 2,
+    scored (max - min) * sum of the normalised Sobel magnitude, kept at >= BOX_SCORE_MIN of the best score; a box's points are above 0.9 of
+    its maximum."""
+    sobel = sobel_edge_detection(to_gray(np.asarray(image, np.float32)))
     sobel /= np.nanmax(sobel)
     M, N = sobel.shape
-    grid_step = grid_size // 2
-
-    candidates = []
-    for m in range(0, M - grid_step, grid_step):
-        for n in range(0, N - grid_step, grid_step):
-            m0 = m
-            m1 = m0 + grid_size + 1
-            n0 = n
-            n1 = n0 + grid_size + 1
-            p = np.array(sobel[m0 : m1, n0 : n1])
+    step = grid_size // 2
+    boxes = []
+    for m0 in range(0, M - step, step):
+        for n0 in range(0, N - step, step):
+            p = sobel[m0:m0 + grid_size + 1, n0:n0 + grid_size + 1]
             pmax = np.nanmax(p)
-            pmin = np.nanmin(p)
-            psum = np.nansum(p)
-            score = (pmax - pmin) * psum
-            candidates.append(dict(score=score, pos=(m0,n0), size=grid_size + 1, pmax=pmax, p=p))
+            boxes.append(((pmax - np.nanmin(p)) * np.nansum(p), m0, n0, p, pmax))
+    best = max(max(box[0] for box in boxes), 1.0)
+    return [((m0, n0), np.argwhere(p > 0.9 * pmax) + (m0, n0)) for score, m0, n0, p, pmax in boxes if score / best >= BOX_SCORE_MIN]
 
-    candidates = sorted(candidates, key = lambda x: x["score"], reverse=True)
 
-    # Normalize the scores.
-    max_score = max(candidates[0]["score"], 1.0)
-
-    for can in candidates:
-        can["score"] /= max_score
-
-    candidates = [can for can in candidates if can["score"] >= 0.6]
-
+def detect_moon(image: np.ndarray, grid_size: int = 200, plot: bool = False) -> tuple[Circle, float]:
+    """(circle, confidence) of the moon from the edge points of moon_edge_boxes, without outlier boxes such as stars.
+    1. boxes far from the others are dropped: robust z-score (median, 1.4826 MAD, at least 1 px) of each box centre's distance from the
+       median box centre above BOX_Z_MAX;
+    2. fit_circle on the remaining points, then while the worst box's median distance from the circle is above BOX_RESIDUAL_MAX, drop it and refit.
+    confidence = share of all the edge points within EDGE_TOLERANCE of the circle.  ValueError when fewer than MIN_BOXES boxes are left.
+    plot draws a new matplotlib figure: the image, the kept boxes (white), the dropped ones (red), the kept edge points and the circle (red)."""
+    found = moon_edge_boxes(image, grid_size)
+    boxes = [points for origin, points in found]
+    if len(boxes) < MIN_BOXES:
+        raise ValueError(f"{len(boxes)} edge boxes, need at least {MIN_BOXES}")
+    centres = np.array([box.mean(axis=0) for box in boxes])
+    distance = np.hypot(*(centres - np.median(centres, axis=0)).T)
+    spread = max(1.4826 * np.median(np.abs(distance - np.median(distance))), 1.0)
+    kept = [i for i, d in enumerate(distance) if (d - np.median(distance)) / spread <= BOX_Z_MAX]
+    while True:
+        if len(kept) < MIN_BOXES:
+            raise ValueError(f"{len(kept)} consistent edge boxes, need at least {MIN_BOXES}")
+        m, n, r = fit_circle(np.unique(np.concatenate([boxes[i] for i in kept]), axis=0))
+        residual = [np.median(np.abs(np.hypot(boxes[i][:, 0] - m, boxes[i][:, 1] - n) - r)) for i in kept]
+        worst = int(np.argmax(residual))
+        if residual[worst] <= BOX_RESIDUAL_MAX:
+            break
+        del kept[worst]
+    points = np.unique(np.concatenate(boxes), axis=0)
+    confidence = float(np.mean(np.abs(np.hypot(points[:, 0] - m, points[:, 1] - n) - r) <= EDGE_TOLERANCE))
     if plot:
-        plot_patches(image, candidates, show=False, title="")
-
-    raw_points = set()
-    for can in candidates:
-        m0, n0 = can["pos"]
-        p = can["p"]
-        pmax = can["pmax"]
-        mask = p > 0.90 * pmax
-        mm, nn = np.where(mask)
-        for m, n in [(m0 + m, n0 + n) for m, n in zip(mm, nn)]:
-            raw_points.add((m,n))
-
-    raw_points = list(raw_points)
-
-    m, n, r = fit_circle(raw_points)
-
-    if plot:
+        plt.figure(facecolor="black", figsize=(16, 8))
+        imshow(image)
         ax = plt.gca()
-        for y, x in raw_points:
-            plt.scatter(x, y, color="red")
-    
-        rect = plt.Circle((n, m), r, ls='-', color="red", fill=False)
-        ax.add_patch(rect)
+        for i, ((m0, n0), box) in enumerate(found):
+            ax.add_patch(plt.Rectangle((n0, m0), grid_size + 1, grid_size + 1, color="white" if i in kept else "red", fill=False))
+        inliers = np.concatenate([boxes[i] for i in kept])
+        plt.scatter(inliers[:, 1], inliers[:, 0], color="red", s=1)
+        ax.add_patch(plt.Circle((n, m), r, ls="-", color="red", fill=False))
+    return Circle(center=(m, n), radius=r), confidence
 
-    return Circle(center=(m,n), radius=r)
-    
 def mask_circle(image_array, circle, pad=3, outside=0.0, inside=1.0):
     """
     Masks a circle in an image array.
