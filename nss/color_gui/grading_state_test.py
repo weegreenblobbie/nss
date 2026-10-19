@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from nss.color_math import create_default_state
+from nss.color_explore.state import create_default_state
 from nss.color_gui.grading_state import grading_kwargs, grade
 from nss.color_grading.grading import Grading
 from nss.icc import gamma_icc_bytes

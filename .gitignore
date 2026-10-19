@@ -4,6 +4,6 @@ __pycache__
 venv/
 ai-venv/
 work-in-progress.txt
-tests/test_data/*.png
+tests/test_data/*
 test_data.tar.gz
 

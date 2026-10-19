@@ -18,7 +18,7 @@ from PyQt6.QtGui import (
     QPixmap,
     QAction,
 )
-from nss.color_math import StateNode
+from nss.color_explore.state import StateNode
 
 class ImageContainer(QLabel):
     """

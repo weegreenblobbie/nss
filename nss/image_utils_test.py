@@ -1,3 +1,4 @@
+"""Tests of nss.image_utils: the float to 8-bit display mapping."""
 import numpy as np
 import pytest
 from nss.image_utils import to_uint8_display

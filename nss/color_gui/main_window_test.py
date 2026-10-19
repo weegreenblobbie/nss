@@ -262,7 +262,7 @@ def test_random_shift_enabled_only_with_a_sample_and_a_checked_panel() -> None:
 def test_random_shift_changes_only_checked_panels_from_the_current_values() -> None:
     """Mixer only: the wheels stay and each click is random_shift of the sliders as they are now (so clicks accumulate), one undo step each;
     Grading only: the mixer stays."""
-    from nss.color_math import random_shift
+    from nss.color_explore.random_shift import random_shift
     app = QApplication.instance() or QApplication([])
     window = _window_with_image()
     window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
@@ -800,7 +800,7 @@ def test_color_grading_group_holds_wheel_tabs_and_master_controls() -> None:
 def test_harmony_sampling_round_trip() -> None:
     """An eyedropper pick adds a sample at the proxy pixel with the displayed median colour and the pre-mixer hue, places its circle on the preview,
     keeps its hue when a mixer Hue slider moves, and undo / redo remove and restore it."""
-    from nss.color_harmony import median_rgb
+    from nss.color_explore.harmony import median_rgb
     from nss.color_mixer.hue_remap import native_hue
     app = QApplication.instance() or QApplication([])
     window = _window_with_image()
