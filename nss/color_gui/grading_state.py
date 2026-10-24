@@ -5,7 +5,7 @@ Bridge from the GUI's StateNode (sat 0..1, light / balance -1..1, blending 0..1,
 import numpy as np
 
 from nss.color_grading.grading import Grading
-from nss.color_math import StateNode
+from nss.color_explore.state import StateNode
 
 WHEEL_KEYS = (("sh", "shadow"), ("mi", "midtone"), ("hi", "highlight"), ("gl", "global"))
 

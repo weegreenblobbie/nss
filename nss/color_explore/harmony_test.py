@@ -1,7 +1,7 @@
-"""Tests of nss.color_harmony: wrapped differences, the best-fit rotation and the warped wedges."""
+"""Tests of nss.color_explore.harmony: wrapped differences, the best-fit rotation and the warped wedges."""
 import numpy as np
 
-from nss.color_harmony import HARMONY_MODES, angdiff, best_rotation, in_wedge, median_rgb, nearest_wedge, wedge_arcs
+from nss.color_explore.harmony import HARMONY_MODES, angdiff, best_rotation, in_wedge, median_rgb, nearest_wedge, wedge_arcs
 from nss.color_mixer.hue_remap import hue_remap_forward, hue_remap_lut
 
 

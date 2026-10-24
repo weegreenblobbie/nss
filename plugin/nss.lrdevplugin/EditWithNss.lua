@@ -1,4 +1,4 @@
--- Library > Plug-in Extras > Edit with nss.Color
+-- Library > Plug-in Extras > nss > Color: Edit...
 --   1. remember the photo's mixer / color grading values, set them to neutral, export a 16-bit Adobe RGB TIFF (everything else baked in), put the values back
 --   2. write the request file, run the launcher (the nss color GUI) and wait for it
 --   3. read the values the GUI wrote and apply them to the photo (one undo step "nss.Color")
@@ -54,7 +54,7 @@ end
 local function quote(s) return '"' .. s .. '"' end
 
 local function run()
-  trace('--- Edit with nss.Color')
+  trace('--- Color: Edit')
   local catalog = LrApplication.activeCatalog()
   local photo = catalog:getTargetPhoto()
   if not photo then
@@ -68,7 +68,7 @@ local function run()
     if current[k] == nil then table.insert(missing, k) end
   end
   if #missing > 0 then
-    LrDialogs.message('nss.Color', 'Unknown develop settings (nothing was changed):\n' .. table.concat(missing, ', ') .. '\nRun "write develop settings to the log" and correct Keys.lua.', 'critical')
+    LrDialogs.message('nss.Color', 'Unknown develop settings (nothing was changed):\n' .. table.concat(missing, ', ') .. '\nRun "Color: Write develop settings to the log" and correct Keys.lua.', 'critical')
     return
   end
 

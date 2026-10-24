@@ -1,10 +1,10 @@
-"""Tests of the Random Shift functions in nss.color_math: mixer band weights and damping, the wheel targets, the enabled panels, clamping and
-the explore grid."""
+"""Tests of the Random Shift functions in nss.color_explore.random_shift: mixer band weights and damping, the wheel targets, the enabled
+panels, clamping and the explore grid."""
 import numpy as np
 
 from nss.color_grading.grading import Grading
-from nss.color_math import (ShiftColors, StateNode, circular_median, create_default_state, explore_states, mixer_weights, random_shift,
-                            shift_colors, tonal_zone)
+from nss.color_explore.random_shift import ShiftColors, circular_median, explore_states, mixer_weights, random_shift, shift_colors, tonal_zone
+from nss.color_explore.state import StateNode, create_default_state
 from nss.color_mixer.hue_remap import LINEAR_PROPHOTO
 
 

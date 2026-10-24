@@ -1,6 +1,6 @@
 -- Lightroom develop-setting keys that nss.Color owns: the 24 Color Mixer sliders and the Color Grading wheels (shadows, midtones, highlights, global, blending, balance).
 -- `neutral` is what the picture is exported with, so that the GUI can apply them itself.
--- If a key name is wrong for your Lightroom, EditWithNss stops before changing anything; run "write develop settings to the log" and fix the name here.
+-- If a key name is wrong for your Lightroom, EditWithNss stops before changing anything; run "Color: Write develop settings to the log" and fix the name here.
 local M = { all = {}, neutral = {} }
 
 local function add(key, neutral)
@@ -29,5 +29,11 @@ add('ColorGradeGlobalSat', 0)
 add('ColorGradeGlobalLum', 0)
 add('ColorGradeBlending', 50)
 add('SplitToningBalance', 0)
+
+-- The crop keys "Moon: Center" sets (Lightroom's fractions of the photo in its stored, unrotated orientation) and their full-frame values.
+-- The backup holds every develop setting whose name starts with `cropPrefix` (CropConstrain... included); the mixer and grading keys are never touched.
+M.crop = { 'CropLeft', 'CropTop', 'CropRight', 'CropBottom', 'CropAngle' }
+M.cropFull = { CropLeft = 0, CropTop = 0, CropRight = 1, CropBottom = 1, CropAngle = 0 }
+M.cropPrefix = 'Crop'
 
 return M

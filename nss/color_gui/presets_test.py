@@ -2,13 +2,13 @@
 import json
 from pathlib import Path
 
-from nss.color_math import StateNode, create_default_state
+from nss.color_explore.state import StateNode, create_default_state
 from nss.color_gui.presets import save_preset, load_preset, state_from_preset, preset_from_state, VERSION
 
 
 def _graded_state() -> StateNode:
     """A state with distinct, non-default values in every group, Global included."""
-    state = create_default_state("Analogous")
+    state = create_default_state()
     state.update(shadow_hue=210.0, shadow_sat=0.6, shadow_light=-0.15, midtone_sat=0.4, highlight_hue=45.0, highlight_sat=0.25,
                  blending=0.7, balance=-0.5, rotation=15.0, global_hue=30.0, global_sat=0.4, global_light=0.1)
     return state
@@ -44,8 +44,8 @@ def test_legacy_file_without_global_defaults_to_zero(tmp_path: Path) -> None:
 
 
 def test_unknown_keys_ignored_and_values_are_floats() -> None:
-    """Unknown keys are dropped, numbers become floats, harmony_mode stays a string."""
-    state = state_from_preset({"version": 1, "state": {"shadow_sat": "0.3", "not_a_key": 5, "harmony_mode": "Triadic"}})
+    """Unknown keys are dropped (also the old harmony_mode and step_size of earlier presets), numbers become floats."""
+    state = state_from_preset({"version": 1, "state": {"shadow_sat": "0.3", "not_a_key": 5, "harmony_mode": "Triadic", "step_size": 0.2}})
     assert state["shadow_sat"] == 0.3
     assert "not_a_key" not in state
-    assert state["harmony_mode"] == "Triadic"
+    assert "harmony_mode" not in state and "step_size" not in state

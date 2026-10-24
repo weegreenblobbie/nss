@@ -3,7 +3,7 @@ import numpy as np
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QApplication, QLabel
 
-from nss.color_harmony import HARMONY_MODES
+from nss.color_explore.harmony import HARMONY_MODES
 from nss.color_mixer.hue_remap import hue_remap_forward, hue_remap_inverse, hue_remap_lut
 from nss.color_gui.harmony_panel import (MAX_SAMPLES, MIXER_TO_WHEEL, HarmonyPanel, Sample, SampleInfoDialog, color_fields, lowest_free_slot, wheel_angle,
                                          wheel_image, wheel_remap_lut)

@@ -41,16 +41,8 @@ from PyQt6.QtGui import (
 
 from nss.tiff_file import TiffFile
 from nss.image_utils import downsample_image
-from nss.color_math import (
-    StateNode,
-    MutationAxis,
-    create_default_state,
-    generate_mutations,
-    ShiftColors,
-    shift_colors,
-    random_shift,
-    explore_states,
-)
+from nss.color_explore.state import StateNode, create_default_state
+from nss.color_explore.random_shift import ShiftColors, shift_colors, random_shift, explore_states
 from nss.color_grading.grading import Grading
 from nss.mru import MruManager
 
@@ -63,7 +55,7 @@ from nss.color_gui.presets import save_preset, load_preset
 from nss.color_gui.mixer_panel import MixerPanel, MixerCache, mixer_levels, KINDS
 from nss.color_gui.harmony_panel import HarmonyPanel, wheel_angle
 from nss.color_gui.sample_view import SampleView
-from nss.color_harmony import median_rgb
+from nss.color_explore.harmony import median_rgb
 from plugin import lr_bridge
 from nss.color_mixer.hue_remap import native_hue
 
@@ -691,9 +683,6 @@ class MainWindow(QMainWindow):
         """
         snapshot = self.state_manager.capture_snapshot()
         
-        # Keep a constant step size default for backwards compat
-        snapshot["step_size"] = 0.2
-        
         # Avoid duplicate pushes
         if self.state_manager.undo_stack and self.state_manager.undo_stack[-1] == snapshot:
             return
@@ -749,8 +738,6 @@ class MainWindow(QMainWindow):
         Translates a Memento Snapshot back to a legacy StateNode dictionary for math operations.
         """
         state = create_default_state()
-
-        state["step_size"] = snapshot.get("step_size", 0.2)
 
         # Shadows
         sh_state = snapshot.get("shadows_zone", {})
@@ -1277,7 +1264,7 @@ class MainWindow(QMainWindow):
             self.update_recent_directories_menu()
             
             # Push initial starting state onto the StateManager
-            initial_state = create_default_state("Monochromatic")
+            initial_state = create_default_state()
             self.apply_state_node_to_widgets(initial_state)
             self.harmony_panel.clear_samples()     # samples are pixels of the old image; mode and rotation are kept
             
@@ -1286,7 +1273,6 @@ class MainWindow(QMainWindow):
             self.state_manager.redo_stack.clear()
             
             snapshot = self.state_manager.capture_snapshot()
-            snapshot["step_size"] = 0.20
             self.state_manager.push_state(snapshot)
             
             # Render View
