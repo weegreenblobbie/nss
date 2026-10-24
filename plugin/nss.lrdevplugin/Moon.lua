@@ -13,10 +13,10 @@ local LrDialogs = import 'LrDialogs'
 local LrExportSession = import 'LrExportSession'
 local LrFileUtils = import 'LrFileUtils'
 local LrFunctionContext = import 'LrFunctionContext'
-local LrLogger = import 'LrLogger'
 local LrPathUtils = import 'LrPathUtils'
 local LrProgressScope = import 'LrProgressScope'
 local LrTasks = import 'LrTasks'
+local Common = require 'Common'
 local Config = require 'Config'
 local Keys = require 'Keys'
 local Settings = require 'Settings'
@@ -26,10 +26,8 @@ local HISTORY = 'nss.Moon: center'
 local RESULT_KEYS = { 'status', 'message', 'confidence', 'cx', 'cy', 'radius', 'width', 'height', 'crop_width', 'crop_height', 'dx', 'dy',
                       'left', 'top', 'right', 'bottom' }
 
-local logger = LrLogger('nssColor')
-logger:enable('logfile')
-
-local tracePath = LrPathUtils.child(LrPathUtils.getStandardFilePath('documents'), 'nss_color_trace.txt')     -- the trace file EditWithNss.lua writes
+local tracePath = Common.tracePath
+local writeLines, readValues, applyTo, quote = Common.writeLines, Common.readValues, Common.applyTo, Common.quote
 
 -- Empties the trace file and writes msg as its first line: Moon: Center starts each run's trace afresh (verify and Color: Edit... append).
 function M.startTrace(msg)
@@ -39,43 +37,8 @@ function M.startTrace(msg)
 end
 
 -- Appends a line to the trace file (and Lightroom's log).
-function M.trace(msg)
-  local f = io.open(tracePath, 'a')
-  if f then
-    f:write(os.date('%H:%M:%S '), msg, '\n')
-    f:close()
-  end
-  logger:info(msg)
-end
+M.trace = Common.trace
 
-local function writeLines(path, lines)
-  local f, err = io.open(path, 'w')
-  if not f then return false, err end
-  f:write(table.concat(lines, '\n'), '\n')
-  f:close()
-  return true
-end
-
--- key=value lines as strings (moon.py's result file)
-local function readLines(path)
-  local f = io.open(path, 'r')
-  if not f then return nil end
-  local values = {}
-  for line in f:lines() do
-    local k, v = line:match('^%s*([%w_.]+)%s*=%s*(.-)%s*$')
-    if k then values[k] = v end
-  end
-  f:close()
-  return values
-end
-
-local function applyTo(catalog, photo, settings, name)
-  catalog:withWriteAccessDo(name, function()
-    photo:applyDevelopSettings(settings, name)
-  end, { timeout = 10 })
-end
-
-local function quote(s) return '"' .. s .. '"' end
 local function photoName(photo) return photo:getFormattedMetadata('fileName') end
 
 -- the work folder inside Lightroom's temp folder, emptied of an earlier run's files
@@ -100,24 +63,10 @@ end
 local function export(photos, work, bar)
   local index = {}
   for i, photo in ipairs(photos) do index[photo.localIdentifier] = i end
-  local session = LrExportSession({
-    photosToExport = photos,
-    exportSettings = {
-      LR_format = 'TIFF',
-      LR_export_colorSpace = 'AdobeRGB',
-      LR_export_bitDepth = 16,
-      LR_tiff_compressionMethod = 'compressionMethod_None',
-      LR_export_destinationType = 'specificFolder',
-      LR_export_destinationPathPrefix = work,
-      LR_export_useSubfolder = false,
-      LR_collisionHandling = 'rename',          -- two photos with the same file name get distinct TIFFs
-      LR_renamingTokensOn = false,
-      LR_size_doConstrain = false,              -- full size: detect_moon's grid size is in pixels
-      LR_outputSharpeningOn = false,
-      LR_reimportExportedPhoto = false,
-      LR_useWatermark = false,
-    },
-  })
+  local exportSettings = Common.tiffExportSettings(work)       -- full size: detect_moon's grid size is in pixels
+  exportSettings.LR_collisionHandling = 'rename'               -- two photos with the same file name get distinct TIFFs
+  exportSettings.LR_renamingTokensOn = false
+  local session = LrExportSession({ photosToExport = photos, exportSettings = exportSettings })
   local paths, failures, canceled = {}, {}, false
   for _, rendition in session:renditions() do
     canceled = canceled or bar.scope:isCanceled()
@@ -177,7 +126,7 @@ local function runMoon(work, header, photoLines, count, bar)
     end
   end
   M.trace('launcher exit code ' .. tostring(code) .. ', result file exists: ' .. tostring(LrFileUtils.exists(resultPath)))
-  local values = code == 0 and readLines(resultPath) or nil
+  local values = code == 0 and readValues(resultPath) or nil
   if not values then
     return nil, 'moon.py finished with exit code ' .. tostring(code) .. ' and wrote no result.\n\nWhat it printed: Documents\\nss_moon_bat.txt\nTrace: ' .. tracePath
   end

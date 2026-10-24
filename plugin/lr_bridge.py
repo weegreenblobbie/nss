@@ -13,6 +13,8 @@ nss.color_mixer.ColorMixer.apply (lists of eight, red .. magenta) and tests.test
 """
 from dataclasses import dataclass
 
+from plugin.handover import read_values
+
 BANDS = ("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")
 MIXER = (("hue", "HueAdjustment"), ("sat", "SaturationAdjustment"), ("lum", "LuminanceAdjustment"))
 # Lightroom still stores the shadow and highlight hue / saturation under the old split-toning names (checked on a Lightroom Classic 15.6 photo)
@@ -36,17 +38,6 @@ class Request:
     balance: float
 
 
-def _read_lines(path):
-    values = {}
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and "=" in line:
-                key, value = line.split("=", 1)
-                values[key.strip()] = value.strip()
-    return values
-
-
 def _number(values, key, default):
     try:
         return float(values[key])
@@ -55,7 +46,7 @@ def _number(values, key, default):
 
 
 def read_request(path):
-    v = _read_lines(path)
+    v = read_values(path)
     if "tiff" not in v or "result" not in v:
         raise ValueError(f"{path}: request needs tiff= and result= lines")
     mixer = {name: [_number(v, prefix + band, 0.0) for band in BANDS] for name, prefix in MIXER}

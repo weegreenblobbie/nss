@@ -8,50 +8,12 @@ local LrFileUtils = import 'LrFileUtils'
 local LrPathUtils = import 'LrPathUtils'
 local LrDialogs = import 'LrDialogs'
 local LrExportSession = import 'LrExportSession'
-local LrLogger = import 'LrLogger'
+local Common = require 'Common'
 local Keys = require 'Keys'
 local Config = require 'Config'
 
-local logger = LrLogger('nssColor')
-logger:enable('logfile')
-
-local tracePath = LrPathUtils.child(LrPathUtils.getStandardFilePath('documents'), 'nss_color_trace.txt')
-local function trace(msg)
-  local f = io.open(tracePath, 'a')
-  if f then
-    f:write(os.date('%H:%M:%S '), msg, '\n')
-    f:close()
-  end
-  logger:info(msg)
-end
-
-local function writeLines(path, lines)
-  local f, err = io.open(path, 'w')
-  if not f then return false, err end
-  f:write(table.concat(lines, '\n'), '\n')
-  f:close()
-  return true
-end
-
-local function readValues(path)
-  local f = io.open(path, 'r')
-  if not f then return nil end
-  local values = {}
-  for line in f:lines() do
-    local k, v = line:match('^%s*([%w_]+)%s*=%s*(.-)%s*$')
-    if k and tonumber(v) then values[k] = tonumber(v) end
-  end
-  f:close()
-  return values
-end
-
-local function applyTo(catalog, photo, settings, name)
-  catalog:withWriteAccessDo(name, function()
-    photo:applyDevelopSettings(settings, name)
-  end, { timeout = 10 })
-end
-
-local function quote(s) return '"' .. s .. '"' end
+local logger, tracePath, trace = Common.logger, Common.tracePath, Common.trace
+local writeLines, readValues, applyTo, quote = Common.writeLines, Common.readValues, Common.applyTo, Common.quote
 
 local function run()
   trace('--- Color: Edit')
@@ -92,25 +54,11 @@ local function run()
   -- 1. export without the mixer and the wheels
   trace('exporting to ' .. tiff)
   applyTo(catalog, photo, Keys.neutral, 'nss.Color: export without mixer and wheels')
-  local session = LrExportSession({
-    photosToExport = { photo },
-    exportSettings = {
-      LR_format = 'TIFF',
-      LR_export_colorSpace = 'AdobeRGB',
-      LR_export_bitDepth = 16,
-      LR_tiff_compressionMethod = 'compressionMethod_None',
-      LR_export_destinationType = 'specificFolder',
-      LR_export_destinationPathPrefix = work,
-      LR_export_useSubfolder = false,
-      LR_collisionHandling = 'overwrite',
-      LR_renamingTokensOn = true,
-      LR_tokens = 'nss_input',
-      LR_size_doConstrain = false,
-      LR_outputSharpeningOn = false,
-      LR_reimportExportedPhoto = false,
-      LR_useWatermark = false,
-    },
-  })
+  local exportSettings = Common.tiffExportSettings(work)
+  exportSettings.LR_collisionHandling = 'overwrite'
+  exportSettings.LR_renamingTokensOn = true
+  exportSettings.LR_tokens = 'nss_input'
+  local session = LrExportSession({ photosToExport = { photo }, exportSettings = exportSettings })
   local ok, err = LrTasks.pcall(function() session:doExportOnCurrentTask() end)
   applyTo(catalog, photo, saved, 'nss.Color: restore')      -- the photo is back as it was, whatever happened
   if not ok then
@@ -146,8 +94,9 @@ local function run()
   local values = readValues(resultPath)
   local settings, count = {}, 0
   for _, k in ipairs(Keys.all) do
-    if values and values[k] then
-      settings[k] = math.floor(values[k] + 0.5)
+    local value = values and tonumber(values[k])
+    if value then
+      settings[k] = math.floor(value + 0.5)
       count = count + 1
     end
   end

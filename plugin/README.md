@@ -12,13 +12,15 @@ below) and are untested.
 ## Files
 
 * `nss.lrdevplugin/` - the plug-in folder you add to Lightroom (`Info.lua`,
-  `Config.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`,
-  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`).
+  `Config.lua`, `Common.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`,
+  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`, `ICM.lua`).
 * `nss_color.bat` - the launcher Lightroom runs: starts
   `color.py --lightroom <request file>` with the repo's `venv` Python.
 * `nss_moon.bat` - the moon launcher: starts `moon.py --request <request file>`.
-* `lr_bridge.py`, `moon_bridge.py` - read the request file and write the result
-  file on the Python side (formats in their docstrings).
+* `nss_icm.bat` - the ICM launcher: starts `python -m nss.icm --lightroom <request file>`.
+* `lr_bridge.py`, `moon_bridge.py`, `icm_bridge.py` - read the request file and
+  write the result file on the Python side (formats in their docstrings);
+  `handover.py` reads the `key=value` files.
 
 ## Install
 
@@ -33,10 +35,10 @@ below) and are untested.
 
 2. **Configure the paths.**  These files contain the author's repo path
    (`C:\users\weegr\code\nss`); change it to your clone:
-   * `nss_color.bat` and `nss_moon.bat`: the `cd /d ...` line and the path to
-     `venv\scripts\python.exe`.
-   * `nss.lrdevplugin\Config.lua`: `launcher` and `moonLauncher`, the full
-     paths of `nss_color.bat` and `nss_moon.bat`.
+   * `nss_color.bat`, `nss_moon.bat` and `nss_icm.bat`: the `cd /d ...` line and
+     the path to `venv\scripts\python.exe`.
+   * `nss.lrdevplugin\Config.lua`: `launcher`, `moonLauncher` and `icmLauncher`,
+     the full paths of `nss_color.bat`, `nss_moon.bat` and `nss_icm.bat`.
 
 3. **Add the plug-in to Lightroom Classic.**  File > Plug-in Manager > Add,
    select the `plugin\nss.lrdevplugin` folder, and check that `nss` is
@@ -52,6 +54,22 @@ below) and are untested.
 3. Edit, then press **Apply to Lightroom** in the GUI's status bar.  The values
    are applied to the photo as one undo step, `nss.Color`.  Closing the window
    without Apply leaves the photo unchanged.
+
+## Intentional camera movement
+
+1. Select a photo and choose Library > Plug-in Extras > **ICM: Intentional Camera Movement**
+   (with several selected, only the active one is opened).
+2. The plug-in exports it as a 16-bit Adobe RGB TIFF with all its edits and the
+   crop baked in (Lightroom's temp folder, `nss_icm`) and opens it in
+   `nss.icm`.
+3. Draw the motion path, set the curves, and press **Save to Lightroom**: the
+   ICM picture is rendered at full size and written as `<name>_icm.tif` next to
+   the original (`_icm_2`, `_icm_3` ... when taken; never overwritten), then
+   imported stacked above the original and selected.  When the original's
+   folder is not writable it goes to `Config.lua`'s `icmFallbackFolder`
+   (default `Documents\nss_icm`), unstacked, and a dialog says where.  Closing
+   the window with an unsaved motion asks whether to save to Lightroom first;
+   closing it without saving changes nothing.
 
 ## Center the moon
 
@@ -86,8 +104,8 @@ below) and are untested.
 
 ## Troubleshooting
 
-* `Documents\nss_color_bat.txt`, `Documents\nss_moon_bat.txt` - what the
-  launchers printed, and the exit code.
+* `Documents\nss_color_bat.txt`, `Documents\nss_moon_bat.txt`,
+  `Documents\nss_icm_bat.txt` - what the launchers printed, and the exit code.
 * `Documents\nss_color_trace.txt` - the plug-in's steps and Moon: Center's
   results (export, command run, result); Moon: Center empties it first, the
   other menu items append.
