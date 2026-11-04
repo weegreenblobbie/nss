@@ -94,7 +94,9 @@ Checks sampled image colours against harmony wedges and shows how the Color Mixe
 ## Threads
 
 No grading runs on the GUI thread.  `PreviewWorker` grades the single preview (while one runs, only the newest request is kept and starts when
-it finishes); `GradingWorker` grades the 3x3 grid; `SaveWorker` grades and writes the full-resolution file.  Slider drags are debounced
+it finishes); `GradingWorker` grades the 3x3 grid, `GRID_THREADS` cells at a time, from a `GRID_DIM` (400 px) copy of the proxy, about the size of a
+cell on screen (the 1200 px proxy cost 9 full previews, one after another).  Leaving Explore Mode renders the single preview once from the master
+downsampled to the preview widget's size (`preview_fit_image`); the next change goes back to the 1200 px proxy; `SaveWorker` grades and writes the full-resolution file.  Slider drags are debounced
 (`RENDER_DEBOUNCE_MS`); a release renders immediately.  Closing the window waits for running workers.
 
 While a Color Mixer slider is held, the preview renders a smaller copy (`DRAG_PREVIEW_DIM`); the release renders the 1200 px proxy.

@@ -1,6 +1,7 @@
 """The Color Grading Explorer main window: wheel tabs, master controls, explore grid, file IO and the worker threads that grade off the GUI thread."""
 import numpy as np
-from typing import Callable, List, Optional, Literal
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, List, Optional, Literal, Tuple
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QPointF, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -61,6 +62,8 @@ from nss.color_mixer.hue_remap import native_hue
 
 RENDER_DEBOUNCE_MS = 150    # a slider drag re-grades the preview once it pauses this long
 DRAG_PREVIEW_DIM = 600      # max dimension of the preview rendered while a Color Mixer slider is held; release renders the 1200 px proxy
+GRID_DIM = 400              # max dimension of the images graded for the 3x3 explore grid (about the size of a grid cell on screen)
+GRID_THREADS = 8            # grid cells graded at the same time
 # Lightroom wheel name, grading_kwargs prefix, StateNode prefix
 LIGHTROOM_WHEELS = (("shadows", "sh", "shadow"), ("midtones", "mi", "midtone"), ("highlights", "hi", "highlight"), ("global", "gl", "global"))
 
@@ -309,10 +312,11 @@ class GradingWorker(QThread):
     to prevent blocking the main PyQt6 GUI event thread.
     """
     progress = pyqtSignal(int, np.ndarray)
+    failed = pyqtSignal(int, str)
     finished_all = pyqtSignal()
 
     def __init__(self, working_image: np.ndarray, states: List[Optional[StateNode]], grade_fn: Callable[[np.ndarray, StateNode], np.ndarray], skip_center: bool = False, parent: Optional[QWidget] = None) -> None:
-        """Grades up to 9 states of working_image with grade_fn; skip_center leaves index 4 out and None states are left out."""
+        """Grades up to 9 states of working_image with grade_fn, GRID_THREADS at a time; skip_center leaves index 4 out and None states are left out."""
         super().__init__(parent)
         self.working_image = working_image
         self.states = states
@@ -324,26 +328,33 @@ class GradingWorker(QThread):
         """Stops before the next state; the one being graded still finishes."""
         self.is_cancelled = True
 
+    def grade_state(self, i: int) -> Optional[np.ndarray]:
+        """State i graded; None when cancelled."""
+        if self.is_cancelled:
+            return None
+        return self.grade_fn(self.working_image, self.states[i])
+
     def run(self) -> None:
-        """Grades the centre first, then the outer states, emitting progress(index, image) for each."""
+        """Starts the centre first, then the outer states, emitting progress(index, image) for each as it finishes, or failed(index, message); finished_all only when none failed."""
         if self.skip_center:
             indices = [i for i in range(9) if i != 4]
         else:
             indices = [4] + [i for i in range(9) if i != 4]
+        indices = [i for i in indices if i < len(self.states) and self.states[i] is not None]
 
-        for i in indices:
-            if self.is_cancelled:
-                return
-            if i >= len(self.states) or self.states[i] is None:
-                continue
-            try:
-                graded = self.grade_fn(self.working_image, self.states[i])
+        failed_any = False
+        with ThreadPoolExecutor(max_workers=GRID_THREADS) as pool:
+            futures = {pool.submit(self.grade_state, i): i for i in indices}
+            for future in as_completed(futures):
                 if self.is_cancelled:
                     return
-                self.progress.emit(i, graded)
-            except Exception:
-                pass
-        self.finished_all.emit()
+                try:
+                    self.progress.emit(futures[future], future.result())
+                except Exception as e:
+                    self.failed.emit(futures[future], str(e))
+                    failed_any = True
+        if not failed_any:
+            self.finished_all.emit()
 
 
 class PreviewWorker(QThread):
@@ -408,12 +419,14 @@ class MainWindow(QMainWindow):
         self.master_image: Optional[np.ndarray] = None
         self.proxy_image: Optional[np.ndarray] = None
         self.drag_proxy: Optional[np.ndarray] = None
+        self.grid_proxy: Optional[np.ndarray] = None
         self.tiff_obj: Optional[TiffFile] = None
         self.grid_states: Optional[List[Optional[StateNode]]] = None     # None cells: Explore Mode could not shift
         self.rng = np.random.default_rng()                                 # Random Shift and the explore grid draw from it
         self.grading_worker: Optional[GradingWorker] = None
         self.preview_worker: Optional[PreviewWorker] = None
         self.pending_preview_state: Optional[StateNode] = None       # newest request made while a preview was being graded
+        self.pending_preview_source: Optional[np.ndarray] = None     # the image that request asked for, None for preview_source()
         self.save_worker: Optional[SaveWorker] = None
         self.grading = Grading()
         self.mixer_cache = MixerCache()
@@ -803,6 +816,13 @@ class MainWindow(QMainWindow):
             return img
         return grade(self.grading, self.mixer_cache.mixed(img, icc, mixer_levels(state)), icc, state)
 
+    def graded_uncached(self, img: np.ndarray, state: StateNode) -> np.ndarray:
+        """Like graded, but the Color Mixer result is neither read from nor stored in the cache: for the explore grid, whose 8 cells each have their own mixer levels."""
+        icc = None if self.tiff_obj is None else self.tiff_obj.iccprofile
+        if icc is None:
+            return img
+        return grade(self.grading, self.mixer_cache.mixer.apply(img, icc, *mixer_levels(state)), icc, state)
+
     def graded_full(self, img: np.ndarray, state: StateNode) -> np.ndarray:
         """The full-resolution img through the Color Mixer (not cached, so no full-size copy is kept) then graded by state; needs the file's ICC profile."""
         icc = self.tiff_obj.iccprofile
@@ -819,8 +839,9 @@ class MainWindow(QMainWindow):
         state = self.rebuild_state_node_from_memento(self.state_manager.capture_snapshot())
         self.request_preview(state)
 
-    def request_preview(self, state: StateNode) -> None:
-        """Grades the single preview in a PreviewWorker.  While one is running, only the newest request is kept; it starts when that one finishes."""
+    def request_preview(self, state: StateNode, source: Optional[np.ndarray] = None) -> None:
+        """Grades the single preview in a PreviewWorker, from `source` or else from preview_source().  While one is running, only the newest
+        request is kept; it starts when that one finishes."""
         if self.proxy_image is None:
             return
         if self.tiff_obj is None or self.tiff_obj.iccprofile is None:     # nothing to grade: no thread needed
@@ -828,9 +849,11 @@ class MainWindow(QMainWindow):
             return
         if self.preview_worker is not None and self.preview_worker.isRunning():
             self.pending_preview_state = state
+            self.pending_preview_source = source
             return
         self.pending_preview_state = None
-        self.preview_worker = PreviewWorker(self.graded,self.preview_source(), state, parent=self)
+        self.pending_preview_source = None
+        self.preview_worker = PreviewWorker(self.graded, self.preview_source() if source is None else source, state, parent=self)
         self.preview_worker.graded.connect(self.single_preview.set_image)
         self.preview_worker.failed.connect(lambda msg: self.statusBar().showMessage(f"Error grading preview: {msg}"))
         self.preview_worker.finished.connect(self.on_preview_finished)
@@ -839,7 +862,7 @@ class MainWindow(QMainWindow):
     def on_preview_finished(self) -> None:
         """Starts the newest preview request made while the last one was grading."""
         if self.pending_preview_state is not None:
-            self.request_preview(self.pending_preview_state)
+            self.request_preview(self.pending_preview_state, self.pending_preview_source)
 
     def render_view_from_memento(self, snapshot: dict) -> None:
         """Re-renders the preview (and the 3x3 grid in Explore Mode) for a snapshot now, cancelling a pending debounce."""
@@ -849,12 +872,11 @@ class MainWindow(QMainWindow):
 
         state = self.rebuild_state_node_from_memento(snapshot)
 
-        # 1. Update Single Preview (Normal Mode)
-        self.request_preview(state)
-        
-        # 2. Update 3x3 Look-Matrix (Explore Mode)
-        if self.explore_widget.isVisible():
+        # Explore Mode: the grid's centre cell also updates the single preview; Normal Mode: the single preview only
+        if self.explore_checkbox.isChecked():
             self.start_explore_mutations_render(state)
+        else:
+            self.request_preview(state)
 
     def start_explore_mutations_render(self, center_state: StateNode) -> None:
         """Cancels a running grid render, generates 8 random shifts around center_state and grades them in a GradingWorker.  When Random Shift is
@@ -885,13 +907,14 @@ class MainWindow(QMainWindow):
 
         # Fire async worker
         self.grading_worker = GradingWorker(
-            self.proxy_image,
+            self.grid_proxy,
             self.grid_states,
-            self.graded,
+            self.graded_uncached,
             skip_center=False,
             parent=self
         )
         self.grading_worker.progress.connect(self.on_worker_progress)
+        self.grading_worker.failed.connect(lambda i, msg: self.statusBar().showMessage(f"Error grading mutation {i}: {msg}"))
         self.grading_worker.finished_all.connect(self.on_worker_finished)
         self.grading_worker.start()
 
@@ -954,8 +977,16 @@ class MainWindow(QMainWindow):
             self.start_explore_mutations_render(state)
         else:
             self.view_stack.setCurrentIndex(0)
-            
+
         self.on_discrete_action()
+        if not is_active and self.master_image is not None:
+            self.request_preview(self.rebuild_state_node_from_memento(self.state_manager.capture_snapshot()), self.preview_fit_image())
+
+    def preview_fit_image(self) -> np.ndarray:
+        """The master image downsampled to fit the single preview widget, one image pixel per screen pixel (never larger than the master)."""
+        h, w = self.master_image.shape[:2]
+        fit = min((self.single_preview.width() - 8) / w, (self.single_preview.height() - 8) / h)     # ImageContainer leaves an 8 px border
+        return downsample_image(self.master_image, max_dim=max(1, round(max(h, w) * fit)))
 
     def random_shift_ready(self) -> bool:
         """True while Random Shift has a colour to aim at and something to change: a Color Harmony sample and Mixer or Grading checked."""
@@ -1034,13 +1065,9 @@ class MainWindow(QMainWindow):
             
         chosen_state = self.grid_states[index]
         
-        # Exit Explore Mode
-        self.explore_checkbox.setChecked(False)
-        self.view_stack.setCurrentIndex(0)
-        
-        # Apply & Push State
+        # Apply the state, then exit Explore Mode: that records the undo step and renders the preview at the widget size
         self.apply_state_node_to_widgets(chosen_state)
-        self.on_discrete_action()
+        self.explore_checkbox.setChecked(False)
         self.statusBar().showMessage(f"Loaded mutation {index} into manual editor. Exiting Explore Mode.")
 
     # ----------------------------------------------------
@@ -1258,6 +1285,7 @@ class MainWindow(QMainWindow):
             self.master_image = tiff.array
             self.proxy_image = downsample_image(self.master_image, max_dim=1200)
             self.drag_proxy = downsample_image(self.proxy_image, max_dim=DRAG_PREVIEW_DIM)
+            self.grid_proxy = downsample_image(self.proxy_image, max_dim=GRID_DIM)
             self.mixer_cache.clear()
             
             self.mru_manager.add_path(file_path)
