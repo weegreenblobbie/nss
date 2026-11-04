@@ -1,5 +1,10 @@
 import argparse
+import os
 import sys
+
+# One OpenBLAS thread per call, set before numpy loads: the explore grid grades on 8 threads and OpenBLAS crashes (access violation) when they all call it with its own thread pool
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 from PyQt6.QtWidgets import QApplication
 from nss.color_gui import MainWindow
 from plugin import lr_bridge

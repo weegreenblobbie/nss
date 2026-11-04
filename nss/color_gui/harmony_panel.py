@@ -306,6 +306,9 @@ class SampleInfoDialog(QDialog):
             layout.addWidget(QLabel("not available" if rgb is None else color_fields(rgb)), row, 2)
 
 
+RESET_TOOLTIP = "Remove all samples, set the mode to None and the rotation to 0 (the Color Mixer is not touched)"
+
+
 class HarmonyPanel(QGroupBox):
     """The Color Harmony controls: mode and eyedropper, the harmony wheel, the 2 x 8 sample patches, the wedge rotation, the fit readout and
     Reset Harmony.  The snapshot (samples, mode, rotation) takes part in undo / redo; the eyedropper on / off does not."""
@@ -319,6 +322,7 @@ class HarmonyPanel(QGroupBox):
         self.on_released_slot = on_released_slot
         self.current_rgb = current_rgb
         self.samples: List[Sample] = []
+        self.removal_enabled = True
         self.hue_levels: Tuple[float, ...] = (0.0,) * 8
         self.lut = wheel_remap_lut(hue_remap_lut(np.zeros(8)))       # F on wheel angles
         self.rotation = 0.0
@@ -365,7 +369,7 @@ class HarmonyPanel(QGroupBox):
         layout.addWidget(self.readout_lbl)
 
         self.reset_btn = QPushButton("Reset Harmony")
-        self.reset_btn.setToolTip("Remove all samples, set the mode to None and the rotation to 0 (the Color Mixer is not touched)")
+        self.reset_btn.setToolTip(RESET_TOOLTIP)
         self.reset_btn.clicked.connect(self.reset)
         layout.addWidget(self.reset_btn)
 
@@ -457,10 +461,17 @@ class HarmonyPanel(QGroupBox):
         self.refresh()
         self.on_released_slot()
 
+    def set_removal_enabled(self, enabled: bool) -> None:
+        """Enables Reset Harmony and the sample menu's Remove action; while disabled the Reset Harmony tooltip says why."""
+        self.removal_enabled = enabled
+        self.reset_btn.setEnabled(enabled)
+        self.reset_btn.setToolTip(RESET_TOOLTIP if enabled else "Samples cannot be removed in Explore Mode.")
+
     def show_sample_menu(self, slot: int, pos: QPoint) -> None:
-        """Context menu with 'Remove sample N' at the global position pos."""
+        """Context menu with 'Remove sample N' at the global position pos; the action is disabled while removal_enabled is False."""
         menu = QMenu(self)
-        menu.addAction(f"Remove sample {slot}", lambda: self.remove_sample(slot))
+        remove = menu.addAction(f"Remove sample {slot}", lambda: self.remove_sample(slot))
+        remove.setEnabled(self.removal_enabled)
         menu.exec(pos)
 
     def show_sample_info(self, slot: int) -> None:

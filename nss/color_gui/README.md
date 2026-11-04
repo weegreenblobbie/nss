@@ -64,13 +64,17 @@ Random Shift moves the sliders at random toward the Color Harmony samples (harmo
 `random_shift` in `nss/color_explore/random_shift.py`; strength = Variation Strength / 100 (default 5%), every r is uniform in [-1, 1].
 
 * **Mixer** (checkbox): each band's weight is the largest, over the samples, of its band weight at the sample's mixer hue
-  (`bands.slider_at`), damped for grey or dark displayed colours (HSV sat and value below 0.1); its Hue, Sat and Lum get r * strength * 100 * weight.
+  (`bands.slider_at`), damped for grey or dark displayed colours (HSV sat and value below 0.1); its Hue, Sat and Lum get
+  r * strength * `MIXER_GAIN` (2) * 100 * weight.
 * **Grading** (checkbox): each sample's displayed colour goes to the tonal wheel whose mask is strongest at its luminance (current Balance and
-  Blending, `tonal_zone`).  A wheel with samples gets hue = circular median of their wheel hues (less Rotation) + r * strength * 360, sat = their
-  median HSV sat + r * strength, light = its own light + r * strength; wheels without samples, Global, Blending and Balance are kept.
+  Blending, `tonal_zone`).  A wheel with samples gets hue = the wheel hue (less Rotation) of one of its samples picked at random + r * strength * 360,
+  and sat + r * strength and light + r * strength added to its own values; wheels without samples, Global, Blending and Balance are kept.
 * The button is enabled only with a sample and a checkbox checked.  Each click starts from the current sliders and is one undo step; in Explore
   Mode it re-rolls the 8 outer images instead.  Explore Mode surrounds the centre with 8 independent shifts of it, or shows the centre only
   (with a status message) when Random Shift is not ready.
+* The Activate Explore Mode checkbox is enabled under the same condition (its tooltip says what is missing), and stays enabled while Explore Mode
+  is on so it can be left; unchecking Mixer and Grading then only disables Random Shift and leaves the grid as it is.
+  Samples cannot be removed in Explore Mode (Reset Harmony and the sample menu's Remove are disabled), so the grid always has the samples it was rolled from.
 
 ## Color Harmony
 
@@ -94,7 +98,9 @@ Checks sampled image colours against harmony wedges and shows how the Color Mixe
 ## Threads
 
 No grading runs on the GUI thread.  `PreviewWorker` grades the single preview (while one runs, only the newest request is kept and starts when
-it finishes); `GradingWorker` grades the 3x3 grid; `SaveWorker` grades and writes the full-resolution file.  Slider drags are debounced
+it finishes); `GradingWorker` grades the 3x3 grid, `GRID_THREADS` cells at a time, from a `GRID_DIM` (400 px) copy of the proxy, about the size of a
+cell on screen (the 1200 px proxy cost 9 full previews, one after another).  Leaving Explore Mode renders the single preview once from the master
+downsampled to the preview widget's size (`preview_fit_image`); the next change goes back to the 1200 px proxy; `SaveWorker` grades and writes the full-resolution file.  Slider drags are debounced
 (`RENDER_DEBOUNCE_MS`); a release renders immediately.  Closing the window waits for running workers.
 
 While a Color Mixer slider is held, the preview renders a smaller copy (`DRAG_PREVIEW_DIM`); the release renders the 1200 px proxy.
