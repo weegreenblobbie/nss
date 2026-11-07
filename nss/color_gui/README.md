@@ -64,13 +64,17 @@ Random Shift moves the sliders at random toward the Color Harmony samples (harmo
 `random_shift` in `nss/color_explore/random_shift.py`; strength = Variation Strength / 100 (default 5%), every r is uniform in [-1, 1].
 
 * **Mixer** (checkbox): each band's weight is the largest, over the samples, of its band weight at the sample's mixer hue
-  (`bands.slider_at`), damped for grey or dark displayed colours (HSV sat and value below 0.1); its Hue, Sat and Lum get r * strength * 100 * weight.
+  (`bands.slider_at`), damped for grey or dark displayed colours (HSV sat and value below 0.1); its Hue, Sat and Lum get
+  r * strength * `MIXER_GAIN` (2) * 100 * weight.
 * **Grading** (checkbox): each sample's displayed colour goes to the tonal wheel whose mask is strongest at its luminance (current Balance and
-  Blending, `tonal_zone`).  A wheel with samples gets hue = circular median of their wheel hues (less Rotation) + r * strength * 360, sat = their
-  median HSV sat + r * strength, light = its own light + r * strength; wheels without samples, Global, Blending and Balance are kept.
+  Blending, `tonal_zone`).  A wheel with samples gets hue = the wheel hue (less Rotation) of one of its samples picked at random + r * strength * 360,
+  and sat + r * strength and light + r * strength added to its own values; wheels without samples, Global, Blending and Balance are kept.
 * The button is enabled only with a sample and a checkbox checked.  Each click starts from the current sliders and is one undo step; in Explore
   Mode it re-rolls the 8 outer images instead.  Explore Mode surrounds the centre with 8 independent shifts of it, or shows the centre only
   (with a status message) when Random Shift is not ready.
+* The Activate Explore Mode checkbox is enabled under the same condition (its tooltip says what is missing), and stays enabled while Explore Mode
+  is on so it can be left; unchecking Mixer and Grading then only disables Random Shift and leaves the grid as it is.
+  Samples cannot be removed in Explore Mode (Reset Harmony and the sample menu's Remove are disabled), so the grid always has the samples it was rolled from.
 
 ## Color Harmony
 

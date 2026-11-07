@@ -588,11 +588,14 @@ class MainWindow(QMainWindow):
         harmony_layout.addLayout(targets_row)
         self.explore_widget.mixer_checkbox.stateChanged.connect(self.update_random_shift_enabled)
         self.explore_widget.grading_checkbox.stateChanged.connect(self.update_random_shift_enabled)
+        self.explore_widget.mixer_checkbox.stateChanged.connect(self.update_explore_enabled)
+        self.explore_widget.grading_checkbox.stateChanged.connect(self.update_explore_enabled)
 
         # Explore Toggle
         self.explore_checkbox = QCheckBox("Activate Explore Mode")
         self.explore_checkbox.setStyleSheet("font-weight: bold;")
         self.explore_checkbox.stateChanged.connect(self.on_explore_mode_toggled)
+        self.explore_checkbox.stateChanged.connect(self.update_explore_enabled)
         harmony_layout.addWidget(self.explore_checkbox)
 
         # Randomize Button
@@ -616,6 +619,7 @@ class MainWindow(QMainWindow):
         self.single_preview.sample_menu_requested.connect(self.harmony_panel.show_sample_menu)
         inspector_layout.addWidget(self.harmony_panel)
         self.update_random_shift_enabled()
+        self.update_explore_enabled()
 
         # Color Mixer (applied before the grade), above the wheel tabs
         self.mixer_panel = MixerPanel(self.on_manual_slider_changed, self.on_mixer_released, self)
@@ -954,8 +958,9 @@ class MainWindow(QMainWindow):
         self.harmony_panel.add_sample(x, y, self.displayed_rgb(x, y), hue)
 
     def on_harmony_samples_changed(self) -> None:
-        """Places the numbered sample circles on the preview at their proxy pixels and enables Random Shift while there are samples."""
+        """Places the numbered sample circles on the preview at their proxy pixels and updates the Random Shift and Explore Mode enabling."""
         self.update_random_shift_enabled()
+        self.update_explore_enabled()
         if self.proxy_image is None:
             self.single_preview.set_markers([])
             return
@@ -966,8 +971,9 @@ class MainWindow(QMainWindow):
     # Explore Mode Actions & Harmonies
     # ----------------------------------------------------
     def on_explore_mode_toggled(self, state_val: int) -> None:
-        """Switches between the single preview and the 3x3 grid and records an undo step."""
+        """Switches between the single preview and the 3x3 grid and records an undo step; samples cannot be removed while the grid is shown."""
         is_active = state_val == 2  # Checked represents value 2
+        self.harmony_panel.set_removal_enabled(not is_active)
         
         if is_active:
             self.view_stack.setCurrentIndex(1)
@@ -996,6 +1002,12 @@ class MainWindow(QMainWindow):
     def update_random_shift_enabled(self) -> None:
         """Enables the Random Shift button only while random_shift_ready."""
         self.randomize_btn.setEnabled(self.random_shift_ready())
+
+    def update_explore_enabled(self) -> None:
+        """Enables the Explore Mode checkbox while random_shift_ready or Explore Mode is on (so it can always be left); the tooltip says why it is off."""
+        enabled = self.random_shift_ready() or self.explore_checkbox.isChecked()
+        self.explore_checkbox.setEnabled(enabled)
+        self.explore_checkbox.setToolTip("" if enabled else "Needs a colour sampled in Color Harmony and Mixer or Grading checked.")
 
     def selected_colors(self, state: StateNode) -> ShiftColors:
         """The Color Harmony samples as random_shift colours: each sample's mixer hue, that hue on the grading wheel less state's Rotation (so it

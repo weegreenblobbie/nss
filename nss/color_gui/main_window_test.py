@@ -304,6 +304,32 @@ def test_explore_mode_without_a_sample_shows_the_centre_only() -> None:
     assert window.explore_widget.var_slider.value() == 40 and window.explore_checkbox.isChecked()
 
 
+def test_explore_checkbox_needs_a_sample_and_a_checked_target_but_can_always_be_left() -> None:
+    """The Explore Mode checkbox is off with a tooltip until a sample exists and Mixer or Grading is checked; once Explore Mode is on, unchecking both
+    targets disables only Random Shift and keeps the checkbox enabled and the 9 cells."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.grid_proxy = window.proxy_image
+    explore = window.explore_widget
+    assert not window.explore_checkbox.isEnabled() and "Color Harmony" in window.explore_checkbox.toolTip()
+    window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
+    assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == ""
+    explore.mixer_checkbox.setChecked(False)
+    explore.grading_checkbox.setChecked(False)
+    assert not window.explore_checkbox.isEnabled()
+    explore.grading_checkbox.setChecked(True)
+    window.explore_checkbox.setChecked(True)
+    window.grading_worker.wait()
+    cells = list(window.grid_states)
+    explore.grading_checkbox.setChecked(False)
+    assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == "" and not window.randomize_btn.isEnabled()
+    assert window.grid_states == cells and window.view_stack.currentIndex() == 1
+    assert not window.harmony_panel.removal_enabled and not window.harmony_panel.reset_btn.isEnabled()
+    window.explore_checkbox.setChecked(False)
+    assert not window.explore_checkbox.isEnabled()
+    assert window.harmony_panel.removal_enabled and window.harmony_panel.reset_btn.isEnabled()
+
+
 def test_multiview_tone_toggle_and_wheel_rendering() -> None:
     """Re-clicking the active tab toggles the all-tones view, which survives tab switches."""
     app = QApplication.instance() or QApplication([])

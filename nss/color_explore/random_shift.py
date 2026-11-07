@@ -12,13 +12,14 @@ from nss.color_explore.state import StateNode
 
 ZONES = ("shadow", "midtone", "highlight")      # StateNode prefixes of the tonal wheels, numbered as tonal_zone numbers them
 DAMPING_LEVEL = 0.1                             # HSV saturation and value below which a colour's mixer shift fades out (to zero at 0)
+MIXER_GAIN = 2.0                                # the mixer shifts are this many times Variation Strength, so mixer and grading shifts feel alike
 
 
 class ShiftColors(NamedTuple):
     """The selected colours random_shift aims at, one entry per colour."""
     mixer_hue: np.ndarray       # mixer-input hue in degrees (the nss.color_mixer.bands hue axis)
     wheel_hue: np.ndarray       # the same colour's hue as a Color Grading wheel hue, degrees
-    sat: np.ndarray             # HSV saturation 0..1
+    sat: np.ndarray            # HSV saturation 0..1
     value: np.ndarray           # HSV value 0..1
     zone: np.ndarray            # index into ZONES
 
@@ -41,14 +42,6 @@ def shift_colors(mixer_hue: np.ndarray, wheel_hue: np.ndarray, rgb_enc: np.ndarr
     return ShiftColors(np.asarray(mixer_hue, np.float64), np.asarray(wheel_hue, np.float64), sat, value, zone)
 
 
-def circular_median(hues: np.ndarray) -> float:
-    """Median of hues in degrees on the circle: the plain median after cutting the circle at the widest gap between neighbouring hues."""
-    h = np.sort(np.mod(hues, 360.0))
-    start = (np.argmax(np.diff(np.append(h, h[0] + 360.0))) + 1) % len(h)
-    unrolled = np.roll(h, -start) + 360.0 * (np.arange(len(h)) >= len(h) - start)
-    return float(np.median(unrolled) % 360.0)
-
-
 def mixer_weights(colors: ShiftColors) -> np.ndarray:
     """Weight (8,) of each mixer band: the largest, over the colours, of the band's weight at the colour's hue times the colour's damping
     clip(sat / DAMPING_LEVEL, 0, 1) * clip(value / DAMPING_LEVEL, 0, 1)."""
@@ -60,14 +53,14 @@ def mixer_weights(colors: ShiftColors) -> np.ndarray:
 def random_shift(state: StateNode, colors: ShiftColors, strength: float, mixer: bool, grading: bool, rng: np.random.Generator) -> StateNode:
     """A copy of state shifted at random toward colors, rounded to the sliders' steps; strength 0..1 is Variation Strength / 100 and every r is
     uniform in [-1, 1], drawn from rng.
-    mixer: each band's Hue, Sat and Lum get r * strength * 100 * its mixer_weights, clamped to -100..100.
-    grading: each tonal wheel with colours in its zone gets hue = circular median of their wheel hues + r * strength * 360 (wrapped),
-    sat = median of their sat + r * strength (clamped 0..1) and light = its own light + r * strength (clamped -1..1); other wheels are kept."""
+    mixer: each band's Hue, Sat and Lum get r * strength * MIXER_GAIN * 100 * its mixer_weights, clamped to -100..100.
+    grading: each tonal wheel with colours in its zone gets hue = the wheel hue of one of those colours picked at random + r * strength * 360
+    (wrapped), and its own sat + r * strength (clamped 0..1) and light + r * strength (clamped -1..1); other wheels are kept."""
     out = state.copy()
     if mixer:
         weights = mixer_weights(colors)
         for kind in ("hue", "sat", "lum"):
-            shifted = np.asarray(state[f"mixer_{kind}"]) + rng.uniform(-1.0, 1.0, 8) * strength * 100.0 * weights
+            shifted = np.asarray(state[f"mixer_{kind}"]) + rng.uniform(-1.0, 1.0, 8) * strength * MIXER_GAIN * 100.0 * weights
             out[f"mixer_{kind}"] = [float(v) for v in np.clip(np.rint(shifted), -100.0, 100.0)]
     if grading:
         for z, prefix in enumerate(ZONES):
@@ -75,8 +68,9 @@ def random_shift(state: StateNode, colors: ShiftColors, strength: float, mixer: 
             if not members.any():
                 continue
             r_hue, r_sat, r_light = rng.uniform(-1.0, 1.0, 3)
-            out[f"{prefix}_hue"] = float(np.rint(circular_median(colors.wheel_hue[members]) + r_hue * strength * 360.0) % 360.0)
-            out[f"{prefix}_sat"] = float(np.clip(np.rint(100.0 * (np.median(colors.sat[members]) + r_sat * strength)), 0.0, 100.0) / 100.0)
+            picked_hue = colors.wheel_hue[members][rng.integers(members.sum())]
+            out[f"{prefix}_hue"] = float(np.rint(picked_hue + r_hue * strength * 360.0) % 360.0)
+            out[f"{prefix}_sat"] = float(np.clip(np.rint(100.0 * (state[f"{prefix}_sat"] + r_sat * strength)), 0.0, 100.0) / 100.0)
             out[f"{prefix}_light"] = float(np.clip(np.rint(100.0 * (state[f"{prefix}_light"] + r_light * strength)), -100.0, 100.0) / 100.0)
     return out
 
