@@ -304,6 +304,32 @@ def test_explore_mode_without_a_sample_shows_the_centre_only() -> None:
     assert window.explore_widget.var_slider.value() == 40 and window.explore_checkbox.isChecked()
 
 
+def test_explore_checkbox_needs_a_sample_and_a_checked_target_but_can_always_be_left() -> None:
+    """The Explore Mode checkbox is off with a tooltip until a sample exists and Mixer or Grading is checked; once Explore Mode is on, unchecking both
+    targets disables only Random Shift and keeps the checkbox enabled and the 9 cells."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.grid_proxy = window.proxy_image
+    explore = window.explore_widget
+    assert not window.explore_checkbox.isEnabled() and "Color Harmony" in window.explore_checkbox.toolTip()
+    window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
+    assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == ""
+    explore.mixer_checkbox.setChecked(False)
+    explore.grading_checkbox.setChecked(False)
+    assert not window.explore_checkbox.isEnabled()
+    explore.grading_checkbox.setChecked(True)
+    window.explore_checkbox.setChecked(True)
+    window.grading_worker.wait()
+    cells = list(window.grid_states)
+    explore.grading_checkbox.setChecked(False)
+    assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == "" and not window.randomize_btn.isEnabled()
+    assert window.grid_states == cells and window.view_stack.currentIndex() == 1
+    assert not window.harmony_panel.removal_enabled and not window.harmony_panel.reset_btn.isEnabled()
+    window.explore_checkbox.setChecked(False)
+    assert not window.explore_checkbox.isEnabled()
+    assert window.harmony_panel.removal_enabled and window.harmony_panel.reset_btn.isEnabled()
+
+
 def test_multiview_tone_toggle_and_wheel_rendering() -> None:
     """Re-clicking the active tab toggles the all-tones view, which survives tab switches."""
     app = QApplication.instance() or QApplication([])
@@ -873,3 +899,107 @@ def test_lightroom_close_without_apply_writes_nothing(tmp_path: Path) -> None:
         window.open_lightroom_request(lr_bridge.read_request(_lightroom_request(tmp_path)))
     window.close()
     assert not window.lightroom_applied and not (tmp_path / "result.txt").exists()
+
+
+def test_grading_worker_grades_cells_concurrently() -> None:
+    """GradingWorker runs cells at the same time, emits each non-None state once with its own result, and leaves None states out."""
+    from nss.color_gui.main_window import GradingWorker
+    barrier = threading.Barrier(2, timeout=10)      # passes only when 2 cells are being graded at the same moment
+    image = np.zeros((4, 7, 3), dtype=np.float32)
+
+    def grade_fn(img: np.ndarray, state: int) -> np.ndarray:
+        barrier.wait()
+        return img + state
+
+    states = [1, 2, None, 4, 5, 6, 7, 8, 9]
+    worker = GradingWorker(image, states, grade_fn)
+    got = {}
+    worker.progress.connect(lambda i, arr: got.update({i: arr}))
+    worker.run()
+    assert sorted(got) == [0, 1, 3, 4, 5, 6, 7, 8]
+    assert all(got[i].shape == (4, 7, 3) and np.all(got[i] == states[i]) for i in got)
+
+
+def test_grading_worker_cancelled_emits_nothing() -> None:
+    """A cancelled GradingWorker grades no cell and emits no image."""
+    from nss.color_gui.main_window import GradingWorker
+    worker = GradingWorker(np.zeros((4, 7, 3), dtype=np.float32), [1] * 9, lambda img, state: img + state)
+    worker.cancel()
+    got = []
+    worker.progress.connect(lambda i, arr: got.append(i))
+    worker.run()
+    assert got == []
+
+
+def test_leaving_explore_mode_renders_preview_at_widget_size() -> None:
+    """Leaving Explore Mode grades the master downsampled to the single preview widget (less its 8 px border); the grid itself uses the 400 px grid proxy."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.master_image = np.random.default_rng(7).random((40, 60, 3)).astype(np.float32)
+    window.grid_proxy = window.proxy_image
+    window.single_preview.setFixedSize(38, 28)
+    with patch('nss.color_gui.main_window.GradingWorker.start'):
+        window.explore_checkbox.setChecked(True)
+    assert window.grading_worker.working_image is window.grid_proxy
+    with patch.object(window, "request_preview") as request:
+        window.explore_checkbox.setChecked(False)
+    state, source = request.call_args_list[-1].args
+    assert source.shape == (20, 30, 3)
+    assert state == window.rebuild_state_node_from_memento(window.state_manager.capture_snapshot())
+
+
+def test_edit_grid_cell_loads_its_state_and_renders_at_widget_size() -> None:
+    """Right-click Edit on a grid cell loads that cell's state, leaves Explore Mode as one undo step and renders the preview at the widget size."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.master_image = np.random.default_rng(8).random((40, 60, 3)).astype(np.float32)
+    window.grid_proxy = window.proxy_image
+    window.single_preview.setFixedSize(38, 28)
+    window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
+    window.explore_widget.grading_checkbox.setChecked(True)
+    with patch('nss.color_gui.main_window.GradingWorker.start'):
+        window.explore_checkbox.setChecked(True)
+    chosen = window.grid_states[0]
+    undo_steps = len(window.state_manager.undo_stack)
+    with patch.object(window, "request_preview") as request:
+        window.on_explore_edit_requested(0)
+    assert not window.explore_checkbox.isChecked()
+    assert len(window.state_manager.undo_stack) == undo_steps + 1
+    state, source = request.call_args_list[-1].args
+    assert source.shape == (20, 30, 3)
+    assert state["shadow_hue"] == chosen["shadow_hue"] and state["midtone_sat"] == chosen["midtone_sat"]
+
+
+def test_grading_worker_reports_a_failed_cell() -> None:
+    """A cell whose grading raises emits failed(index, message), the other cells still arrive, and finished_all is not emitted."""
+    from nss.color_gui.main_window import GradingWorker
+
+    def grade_fn(img: np.ndarray, state: int) -> np.ndarray:
+        if state == 7:
+            raise ValueError("bad state 7")
+        return img + state
+
+    worker = GradingWorker(np.zeros((4, 7, 3), dtype=np.float32), [1, 2, 3, 4, 5, 6, 7, 8, 9], grade_fn)
+    got, failed, finished = [], [], []
+    worker.progress.connect(lambda i, arr: got.append(i))
+    worker.failed.connect(lambda i, msg: failed.append((i, msg)))
+    worker.finished_all.connect(lambda: finished.append(True))
+    worker.run()
+    assert sorted(got) == [0, 1, 2, 3, 4, 5, 7, 8]
+    assert failed == [(6, "bad state 7")]
+    assert finished == []
+
+
+def test_grid_grading_leaves_the_mixer_cache_alone() -> None:
+    """graded_uncached gives the same image as graded for a state with Mixer and wheel values, but stores nothing in the mixer cache."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    img = np.random.default_rng(9).random((13, 24, 3)).astype(np.float32)
+    state = window.rebuild_state_node_from_memento(window.state_manager.capture_snapshot())
+    state["mixer_hue"] = np.array([10.0, -20.0, 30.0, 0.0, 5.0, -40.0, 15.0, 25.0])
+    state["mixer_sat"] = np.array([0.0, 20.0, -10.0, 30.0, 0.0, -5.0, 10.0, 40.0])
+    state["midtone_sat"], state["midtone_hue"] = 0.4, 200.0
+    uncached = window.graded_uncached(img, state)
+    assert window.mixer_cache.entries == {}
+    assert np.array_equal(uncached, window.graded(img, state))
+    assert not np.array_equal(uncached, img)

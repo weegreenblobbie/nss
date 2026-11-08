@@ -1,7 +1,10 @@
 """Tests of nss.color_gui.harmony_panel: slot numbering, the 16-sample limit, the mode fit, live warping, reset and the undo snapshots."""
+from unittest.mock import patch
+
 import numpy as np
+from PyQt6.QtCore import QPoint
 from PyQt6.QtGui import QImage
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtWidgets import QApplication, QLabel, QMenu
 
 from nss.color_explore.harmony import HARMONY_MODES
 from nss.color_mixer.hue_remap import hue_remap_forward, hue_remap_inverse, hue_remap_lut
@@ -112,6 +115,25 @@ def test_reset_clears_harmony_only() -> None:
     assert (panel.samples, panel.mode, panel.rotation, panel.rotation_slider.value()) == ([], "None", 0.0, 0)
     assert panel.hue_levels == (10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -20.0)
     assert len(released) == 1
+
+
+def test_removal_can_be_disabled() -> None:
+    """With removal disabled Reset Harmony is off with a tooltip and the sample menu's Remove action is off; enabling restores both."""
+    app = QApplication.instance() or QApplication([])
+    panel, _ = _panel()
+    _add(panel, 50.0)
+    restored_tip = panel.reset_btn.toolTip()
+    shown = []
+    record = lambda menu, pos: shown.append([action.isEnabled() for action in menu.actions()])
+    panel.set_removal_enabled(False)
+    assert not panel.reset_btn.isEnabled() and "Explore Mode" in panel.reset_btn.toolTip()
+    with patch.object(QMenu, "exec", record):
+        panel.show_sample_menu(1, QPoint(3, 4))
+    panel.set_removal_enabled(True)
+    assert panel.reset_btn.isEnabled() and panel.reset_btn.toolTip() == restored_tip
+    with patch.object(QMenu, "exec", record):
+        panel.show_sample_menu(1, QPoint(3, 4))
+    assert shown == [[False], [True]]
 
 
 def test_undo_redo_round_trip() -> None:
