@@ -29,6 +29,7 @@ drives several of these tools lives in `plugin/` (see `plugin/README.md`).
 | `color_mixer/` | Model of Lightroom's Color Mixer (HSL), table driven. |
 | `color_explore/` | The colour GUI's state, colour harmonies and random shifts. |
 | `color_gui/` | The Color Grading Explorer (`python color.py`); see its README. |
+| `focus_stack/` | Aligns extra frames to a panorama and blends in their sharper regions (`python -m nss.focus_stack`), with a window for painting patches by hand (`python focus_stack.py`); see its README. |
 | `mru.py` | Recently used directories for the colour GUI. |
 | `icm_render.py` | ICM maths: path fitting, the per-frame camera motion and the averaged render. |
 | `icm.py` | The ICM simulator GUI (`python -m nss.icm`). |

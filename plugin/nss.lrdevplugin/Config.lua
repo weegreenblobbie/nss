@@ -22,4 +22,11 @@ return {
   icmWorkFolderName = 'nss_icm',    -- inside Lightroom's temp folder
   -- where the ICM picture goes when the original photo's folder is not writable (normally it goes next to the original)
   icmFallbackFolder = LrPathUtils.child(LrPathUtils.getStandardFilePath('documents'), 'nss_icm'),
+  -- Stack: `stackLauncher` is run as  stackLauncher "<request file>"  (see nss_stack.bat) and starts python focus_stack.py --lightroom on it;
+  -- the result file says saved, cancelled or error (plugin/stack_bridge.py).
+  stackLauncher = [[C:\users\weegr\code\nss\plugin\nss_stack.bat]],
+  stackWorkFolderName = 'nss_stack',  -- inside Lightroom's temp folder; holds one full-size TIFF per photo while the window is open
+  stackMaxFrames = 20,                -- frames besides the target (so at most 21 photos are exported); work in batches beyond that
+  -- where the picture goes when the target's folder is not writable (normally it goes next to the original)
+  stackFallbackFolder = LrPathUtils.child(LrPathUtils.getStandardFilePath('documents'), 'nss_stack'),
 }

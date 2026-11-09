@@ -25,6 +25,7 @@ add or override rules for their subtree.
 
 # Patterns to avoid
 - Do not write local python script for editing files, use standard patch files instead.
+  - `sed` and the editor tools are fine for targeted edits.  The rule is about python scripts, which have a history of going wrong on escaping and quoting.
 - Do not alter surrounding code, formatting, variable names, or whitespace unless required to do so.
 
 # Agent behavior and code generation 

@@ -1,9 +1,10 @@
-# plugin - Lightroom Classic plug-in `nss` (nss.Color and moon centering)
+# plugin - Lightroom Classic plug-in `nss` (nss.Color, moon centering, ICM and Stack)
 
-The plug-in **nss** has two parts.  **Color** opens the selected Lightroom
+The plug-in **nss** has four parts.  **Color** opens the selected Lightroom
 Classic photo in the nss.Color GUI (`color.py`) and writes its Color Mixer and
 Color Grading values back to the photo.  **Moon** crops photos so the moon is
-centred (see Center the moon).
+centred (see Center the moon).  **ICM** simulates intentional camera movement and **Stack** removes people from, or
+repairs the focus of, a series of photos of one scene (see Stack).
 
 **Only tested on Windows** (Lightroom Classic 15.6).  The launcher is a Windows
 batch file; other platforms would need their own launcher script (see Configure
@@ -13,12 +14,13 @@ below) and are untested.
 
 * `nss.lrdevplugin/` - the plug-in folder you add to Lightroom (`Info.lua`,
   `Config.lua`, `Common.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`,
-  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`, `ICM.lua`).
+  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`, `ICM.lua`, `Stack.lua`, `StackClean.lua`, `StackFocus.lua`).
 * `nss_color.bat` - the launcher Lightroom runs: starts
   `color.py --lightroom <request file>` with the repo's `venv` Python.
 * `nss_moon.bat` - the moon launcher: starts `moon.py --request <request file>`.
 * `nss_icm.bat` - the ICM launcher: starts `python -m nss.icm --lightroom <request file>`.
-* `lr_bridge.py`, `moon_bridge.py`, `icm_bridge.py` - read the request file and
+* `nss_stack.bat` - the Stack launcher: starts `focus_stack.py --lightroom <request file>`.
+* `lr_bridge.py`, `moon_bridge.py`, `icm_bridge.py`, `stack_bridge.py` - read the request file and
   write the result file on the Python side (formats in their docstrings);
   `handover.py` reads the `key=value` files.
 
@@ -35,10 +37,10 @@ below) and are untested.
 
 2. **Configure the paths.**  These files contain the author's repo path
    (`C:\users\weegr\code\nss`); change it to your clone:
-   * `nss_color.bat`, `nss_moon.bat` and `nss_icm.bat`: the `cd /d ...` line and
+   * `nss_color.bat`, `nss_moon.bat`, `nss_icm.bat` and `nss_stack.bat`: the `cd /d ...` line and
      the path to `venv\scripts\python.exe`.
-   * `nss.lrdevplugin\Config.lua`: `launcher`, `moonLauncher` and `icmLauncher`,
-     the full paths of `nss_color.bat`, `nss_moon.bat` and `nss_icm.bat`.
+   * `nss.lrdevplugin\Config.lua`: `launcher`, `moonLauncher`, `icmLauncher` and `stackLauncher`,
+     the full paths of `nss_color.bat`, `nss_moon.bat`, `nss_icm.bat` and `nss_stack.bat`.
 
 3. **Add the plug-in to Lightroom Classic.**  File > Plug-in Manager > Add,
    select the `plugin\nss.lrdevplugin` folder, and check that `nss` is
@@ -70,6 +72,30 @@ below) and are untested.
    (default `Documents\nss_icm`), unstacked, and a dialog says where.  Closing
    the window with an unsaved motion asks whether to save to Lightroom first;
    closing it without saving changes nothing.
+
+## Stack: Clean and Stack: Focus
+
+Library > Plug-in Extras > **Stack: Clean (remove people)...** or **Stack: Focus...**, with two or more photos selected (the tool is described in
+`nss/focus_stack/README.md`; clean needs photos shot from one spot).
+
+1. The **active photo starts as the target**, the picture that is corrected: the one Lightroom highlights as the most selected, or the first selected
+   photo when Lightroom reports none.  The other selected photos are the frames, in the order Lightroom lists them (the filmstrip order, which
+   is the Tab order in the window).  **You choose the real target in the window**: Ctrl+click a layer in the Layers panel to look at it, then
+   right-click it and choose "Set ... as the target" (about 20 seconds to align again).  The trace file (`Documents\nss_color_trace.txt`) names
+   the photo the plug-in started with.  At most 21 photos (the target and 20 frames, `stackMaxFrames` in `Config.lua`): work in batches beyond
+   that.  Select the photos first: with no selection Lightroom may report the whole folder.
+2. The plug-in exports every selected photo as a 16-bit Adobe RGB TIFF with all its edits and the crop baked in (Lightroom's temp folder,
+   `nss_stack`; about 150 to 300 MB each at full size, so up to a few GB while the window is open) and opens them in `focus_stack.py`.
+   The progress bar can cancel the export.
+3. Work in the window (paint patches, Tab through the layers), then press **Save to Lightroom** (Ctrl+S): the picture is rendered at full
+   size and written as `<name>_clean.tif` (`_focus.tif` for Stack: Focus), where `<name>` is the photo that is the target *when you save*,
+   next to that photo's original (`_clean_2`, `_clean_3` ... when taken; never overwritten), then imported stacked above that photo and
+   selected.  The plug-in prepares such a path for every photo it exports, and the window says which one it used.  When the folder of the
+   target is not writable the picture goes to `Config.lua`'s `stackFallbackFolder` (default `Documents\nss_stack`), unstacked, and a dialog
+   says where.
+4. **Cancel** (the toolbar button) or closing the window leaves everything unchanged; with patches painted it asks first.  Esc keeps its meaning
+   inside the window (deselect the patch, leave pan mode).  If the frames cannot be aligned or the picture cannot be written, a dialog says why.
+5. The exported TIFFs are deleted in every case.
 
 ## Center the moon
 
@@ -105,7 +131,7 @@ below) and are untested.
 ## Troubleshooting
 
 * `Documents\nss_color_bat.txt`, `Documents\nss_moon_bat.txt`,
-  `Documents\nss_icm_bat.txt` - what the launchers printed, and the exit code.
+  `Documents\nss_icm_bat.txt`, `Documents\nss_stack_bat.txt` - what the launchers printed, and the exit code.
 * `Documents\nss_color_trace.txt` - the plug-in's steps and Moon: Center's
   results (export, command run, result); Moon: Center empties it first, the
   other menu items append.

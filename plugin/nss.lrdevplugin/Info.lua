@@ -9,6 +9,8 @@ return {
     { title = 'Moon: Center', file = 'CenterMoon.lua' },
     { title = 'Moon: Verify centering', file = 'VerifyMoon.lua' },
     { title = 'ICM: Intentional Camera Movement', file = 'ICM.lua' },
+    { title = 'Stack: Clean (remove people)...', file = 'StackClean.lua' },
+    { title = 'Stack: Focus...', file = 'StackFocus.lua' },
   },
   LrPluginInfoProvider = 'PluginInfoProvider.lua',
   VERSION = { major = 1, minor = 0, revision = 0 },
