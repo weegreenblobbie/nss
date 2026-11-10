@@ -411,3 +411,22 @@ def test_lightroom_save_after_changing_the_target_writes_that_photos_output_and_
     QApplication.processEvents()
     assert Path(request.outputs[2]).exists() and not Path(request.outputs[0]).exists()
     assert read_values(request.result) == {"status": "saved", "output": request.outputs[2], "target": "2"}
+
+
+def test_open_in_clean2_mode_lists_the_plate_and_saves_with_it(files: dict) -> None:
+    """clean2's last layer is called "Clean plate", not a median, and the saved picture is rendered with that plate."""
+    window = new_window()
+    window.open(files["paths"][0], files["paths"][1:], WORK_DIM, "clean2")
+    window._load_thread.wait(120000)
+    QApplication.processEvents()
+    panel = window.layers
+    assert [panel.list.item(i).text() for i in range(panel.list.count())][-1] == "Clean plate"
+    assert not window._plan.plate_is_median
+    paint(window, 600.0, 400.0)
+    weights = window.canvas.state.weights()
+    out = str(files["folder"] / "saved2.tif")
+    window.save_to(out)
+    window._save_thread.wait(60000)
+    QApplication.processEvents()
+    expected = render_full(files["target_file"].array, files["frames"], window._plan.frames, weights, 256, window._plan.median)
+    assert np.abs(TiffFile().read(out).array - expected).max() <= 1.5 / 65535

@@ -60,7 +60,8 @@ class StackResult:
     result: np.ndarray  # the composite
     replaced_fraction: float  # share of the pixels covered by any frame that do not take the target
     feather_sigma: float  # softness of the region edges in working pixels, as used for `weights`
-    median: np.ndarray | None = None  # per-pixel median of the target and the frames, the last layer; None unless stacked for a clean plate
+    median: np.ndarray | None = None  # the clean plate, the last layer: the per-pixel median of the target and the frames, or `clean2`'s plate; None unless stacked for one
+    plate_is_median: bool = True  # False when the plate cannot be recomputed from the warped frames, so a full-size render must resample `median`
 
 
 def resize_matrix(full_shape: tuple[int, int], small_shape: tuple[int, int]) -> np.ndarray:
@@ -153,20 +154,28 @@ def resample_rows(small: np.ndarray, full_shape: tuple[int, int], first: int, la
 
 
 def render_strip(
-    target: np.ndarray, sources: list[np.ndarray], frames: list[AlignedFrame], weights: np.ndarray, first: int, last: int
+    target: np.ndarray,
+    sources: list[np.ndarray],
+    frames: list[AlignedFrame],
+    weights: np.ndarray,
+    first: int,
+    last: int,
+    plate: np.ndarray | None = None,
 ) -> np.ndarray:
     """Rows `first` to `last` of the full-size composite of `target` and `sources`.
 
     `frames` and `weights` (index 0 the target, then one per frame, then the median if there is one) are at the working size,
     as `stack_frames`, `stack_clean` or an `EditState` give them. A layer with no weight in the strip is not read at all. The
-    median is computed from the strip's own warped frames, and only when some pixel of the strip uses it.
+    median is computed from the strip's own warped frames, and only when some pixel of the strip uses it; with a working-size
+    `plate` (`StackResult.median` of a plan whose `plate_is_median` is False) that is resampled to the strip instead.
     """
     rows, cols = target.shape[:2]
     work_rows, work_cols = weights.shape[1:]
     full = (rows, cols)
     strip_weights = [resample_rows(weight, full, first, last) for weight in weights]
     strip = target[first:last] * strip_weights[0][..., None]
-    need_median = len(weights) == len(frames) + 2 and bool(strip_weights[-1].any())
+    need_plate = len(weights) == len(frames) + 2 and bool(strip_weights[-1].any())
+    need_median = need_plate and plate is None
     median_layers = [target[first:last]]
     median_covered = [np.ones((last - first, cols), dtype=bool)]
     for frame, source, weight in zip(frames, sources, strip_weights[1:]):
@@ -188,19 +197,26 @@ def render_strip(
             strip += aligned * weight[..., None]
     if need_median:
         strip += masked_median(median_layers, median_covered) * strip_weights[-1][..., None]
+    elif need_plate:
+        strip += resample_rows(plate, full, first, last) * strip_weights[-1][..., None]
     return strip
 
 
 def render_full(
-    target: np.ndarray, sources: list[np.ndarray], frames: list[AlignedFrame], weights: np.ndarray, tile_rows: int
+    target: np.ndarray,
+    sources: list[np.ndarray],
+    frames: list[AlignedFrame],
+    weights: np.ndarray,
+    tile_rows: int,
+    plate: np.ndarray | None = None,
 ) -> np.ndarray:
     """The composite at the full size of `target`, built `tile_rows` rows at a time.
 
-    Each pixel is computed on its own, so the strip height changes the memory used and not the picture.
+    Each pixel is computed on its own, so the strip height changes the memory used and not the picture. `plate` is as for `render_strip`.
     """
     rows = target.shape[0]
     out = np.empty_like(target)
     for first in range(0, rows, tile_rows):
         last = min(first + tile_rows, rows)
-        out[first:last] = render_strip(target, sources, frames, weights, first, last)
+        out[first:last] = render_strip(target, sources, frames, weights, first, last, plate)
     return out

@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from nss.focus_stack.edit import EditState
-from nss.focus_stack.clean import stack_clean
+from nss.focus_stack.clean import stack_clean, stack_clean2
 from nss.focus_stack.gui.canvas import CanvasView
 from nss.focus_stack.gui.layers_panel import LayersPanel
 from nss.focus_stack.register import RegistrationError
@@ -18,6 +18,8 @@ from plugin import stack_bridge
 TILE_ROWS = 1024  # rows of the full-size picture rendered at a time when saving
 THUMBNAIL_DIM = 160  # long side in pixels of the thumbnails in the Layers panel
 MEDIAN_NAME = "Clean plate (median)"  # how the median layer is listed in the Layers panel
+PLATE_NAME = "Clean plate"  # how the layer is listed when it is `clean2`'s plate, which is not a median
+STACKERS = {"focus": stack_frames, "clean": stack_clean, "clean2": stack_clean2}  # the stacking function for each mode
 
 
 class AlignThread(QtCore.QThread):
@@ -28,7 +30,7 @@ class AlignThread(QtCore.QThread):
     failed = QtCore.pyqtSignal(str)  # one line: why it could not
 
     def __init__(self, target_path: str, frame_paths: list[str], work_dim: int, mode: str) -> None:
-        """A thread that will stack `frame_paths` onto `target_path` at working size `work_dim` once started; `mode` is "focus" or "clean"."""
+        """A thread that will stack `frame_paths` onto `target_path` at working size `work_dim` once started; `mode` is "focus", "clean" or "clean2"."""
         super().__init__()
         self.target_path = target_path
         self.frame_paths = frame_paths
@@ -42,7 +44,7 @@ class AlignThread(QtCore.QThread):
             target_file = TiffFile().read(self.target_path)
             frames = [TiffFile().read(path).array for path in self.frame_paths]
             self.progress.emit(f"Aligning {len(frames)} frame{'s' if len(frames) != 1 else ''}")
-            plan = (stack_clean if self.mode == "clean" else stack_frames)(target_file.array, frames, self.work_dim)
+            plan = STACKERS[self.mode](target_file.array, frames, self.work_dim)
         except RegistrationError as error:
             self.failed.emit(f"registration failed: {error}")
             return
@@ -59,7 +61,7 @@ class RestackThread(QtCore.QThread):
     failed = QtCore.pyqtSignal(str)  # one line: why it could not
 
     def __init__(self, target: np.ndarray, frames: list[np.ndarray], work_dim: int, mode: str) -> None:
-        """A thread that will stack `frames` onto `target` at working size `work_dim` once started; `mode` is "focus" or "clean"."""
+        """A thread that will stack `frames` onto `target` at working size `work_dim` once started; `mode` is "focus", "clean" or "clean2"."""
         super().__init__()
         self.target = target
         self.frames = frames
@@ -69,7 +71,7 @@ class RestackThread(QtCore.QThread):
     def run(self) -> None:
         """Emits loaded, or failed with the reason."""
         try:
-            plan = (stack_clean if self.mode == "clean" else stack_frames)(self.target, self.frames, self.work_dim)
+            plan = STACKERS[self.mode](self.target, self.frames, self.work_dim)
         except RegistrationError as error:
             self.failed.emit(f"registration failed: {error}")
             return
@@ -93,14 +95,16 @@ class SaveThread(QtCore.QThread):
         frames: list[AlignedFrame],
         weights: np.ndarray,
         path: str,
+        plate: np.ndarray | None = None,
     ) -> None:
-        """A thread that will render with `weights` (a snapshot, so later edits do not matter) and write `path` once started."""
+        """A thread that will render with `weights` (a snapshot, so later edits do not matter) and write `path` once started; `plate` is as for `render_strip`."""
         super().__init__()
         self.target_file = target_file
         self.frame_arrays = frame_arrays
         self.frames = frames
         self.weights = weights
         self.path = path
+        self.plate = plate
 
     def run(self) -> None:
         """Emits saved, or failed on an exception."""
@@ -109,7 +113,7 @@ class SaveThread(QtCore.QThread):
             out = np.empty_like(target)
             for first in range(0, target.shape[0], TILE_ROWS):
                 last = min(first + TILE_ROWS, target.shape[0])
-                out[first:last] = render_strip(target, self.frame_arrays, self.frames, self.weights, first, last)
+                out[first:last] = render_strip(target, self.frame_arrays, self.frames, self.weights, first, last, self.plate)
                 self.progress.emit(last)
             result = copy.copy(self.target_file)
             result.array = out
@@ -205,7 +209,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
     def open(self, target_path: str, frame_paths: list[str], work_dim: int, mode: str) -> None:
-        """Aligns `frame_paths` to `target_path` in a thread, as `mode` ("focus" or "clean") says, and shows the stack when it is ready."""
+        """Aligns `frame_paths` to `target_path` in a thread, as `mode` ("focus", "clean" or "clean2") says, and shows the stack when it is ready."""
         self.setWindowTitle(f"Focus Stack - {Path(target_path).name} (loading)")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
@@ -243,7 +247,7 @@ class MainWindow(QtWidgets.QMainWindow):
         frame_names = [Path(self._paths[i]).name for i in order[1:]]
         thumbnails = [self._thumbnail(state.target)] + [self._thumbnail(frame.aligned) for frame in plan.frames]
         if plan.median is not None:
-            frame_names.append(MEDIAN_NAME)
+            frame_names.append(MEDIAN_NAME if plan.plate_is_median else PLATE_NAME)
             thumbnails.append(self._thumbnail(plan.median))
         self.canvas.set_state(state, ["target"] + frame_names, full_shape=target_file.array.shape[:2])
         self.layers.set_layers(frame_names, thumbnails, len(plan.frames))
@@ -291,7 +295,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.save_action.setEnabled(False)
-        thread = SaveThread(self._target_file, self._frame_arrays, self._plan.frames, self.canvas.state.weights(), path)
+        plate = None if self._plan.plate_is_median else self._plan.median
+        thread = SaveThread(self._target_file, self._frame_arrays, self._plan.frames, self.canvas.state.weights(), path, plate)
         thread.progress.connect(self.progress_bar.setValue)
         thread.saved.connect(self._on_saved)
         thread.failed.connect(self._on_save_failed)
@@ -366,7 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self.statusBar().showMessage(f"Aligning with {name} as the target")
-        mode = "clean" if self._plan.median is not None else "focus"
+        mode = "focus" if self._plan.median is None else ("clean" if self._plan.plate_is_median else "clean2")
         thread = RestackThread(new_file.array, new_frames, max(self._plan.target.shape[:2]), mode)
         thread.loaded.connect(lambda plan: self._on_restacked(order, new_file, new_frames, plan))
         thread.failed.connect(self._on_restack_failed)

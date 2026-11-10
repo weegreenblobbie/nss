@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from nss.focus_stack.clean import stack_clean
+from nss.focus_stack.clean import stack_clean, stack_clean2
 from nss.focus_stack.register import RegistrationError
 from nss.focus_stack.stack import REFERENCE_DIM, StackResult, render_full, stack_frames
 from nss.image_utils import to_uint8_display
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Replace regions of a target picture with the same regions of extra frames of the same scene: the sharper ones "
         "(--mode focus) or, to remove people and anything else that moved, the ones behind them (--mode clean, frames from one spot).",
     )
-    parser.add_argument("--mode", choices=["focus", "clean"], default="focus", help="what to stack for (default %(default)s)")
+    parser.add_argument("--mode", choices=["focus", "clean", "clean2"], default="focus", help="what to stack for; clean2 is clean with a plate made from the closest pair of frames at each pixel instead of the median, (default %(default)s)")
     parser.add_argument("target", help="the picture to repair, e.g. the Lightroom panorama")
     parser.add_argument("frames", nargs="+", help="extra frames covering the same scene")
     parser.add_argument("-o", "--output", required=True, help="where to write the result")
@@ -55,7 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     target_file = TiffFile().read(args.target)
     frame_arrays = [TiffFile().read(path).array for path in args.frames]
     try:
-        out = (stack_clean if args.mode == "clean" else stack_frames)(target_file.array, frame_arrays, args.work_dim)
+        stacker = {"focus": stack_frames, "clean": stack_clean, "clean2": stack_clean2}[args.mode]
+        out = stacker(target_file.array, frame_arrays, args.work_dim)
     except RegistrationError as error:
         print(f"registration failed: {error}", file=sys.stderr)
         return 1
@@ -63,10 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     for k, (path, frame) in enumerate(zip(args.frames, out.frames), start=1):
         print(f"{path}: {frame.inliers} inliers, used for {100.0 * (out.labels == k).mean():.1f}% of the picture")
     if out.median is not None:
-        print(f"clean plate (median): used for {100.0 * (out.labels == len(out.frames) + 1).mean():.1f}% of the picture")
+        print(f"clean plate ({'pairwise' if args.mode == 'clean2' else 'median'}): used for {100.0 * (out.labels == len(out.frames) + 1).mean():.1f}% of the picture")
     if args.debug_dir is not None:
         write_debug_images(args.debug_dir, out)
-    target_file.array = render_full(target_file.array, frame_arrays, out.frames, out.weights, args.tile_rows) if args.full_res else out.result
+    target_file.array = render_full(target_file.array, frame_arrays, out.frames, out.weights, args.tile_rows, None if out.plate_is_median else out.median) if args.full_res else out.result
     target_file.saveas(args.output)
     rows, cols = target_file.array.shape[:2]
     print(f"replaced {100.0 * out.replaced_fraction:.1f}% of the covered area, wrote {cols}x{rows} to {args.output}")

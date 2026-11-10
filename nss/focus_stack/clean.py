@@ -37,6 +37,10 @@ BAD_GROW = 8  # how far a chosen frame's own person is grown before it is replac
 BAD_LIMIT = 0.3  # a frame with a person at more than this share of the target's foreground pixels shows the same people
 TRUST_FRACTION = 0.7  # a blob is replaced only if the median is trusted over this share of the pixels where the target has a person
 MIN_AREA = 1500  # blobs smaller than this many pixels are ignored
+PLATE_DIFF = 0.06  # the pairwise plate and the median differ where they are further apart than this
+HOLE_SIGMAS = 3  # a frame's own person is grown by this many feather sigmas before the plate replaces it, so the feathering cannot bring it back, in `clean2`
+RING_RADIUS = 20  # how far around a region the calm pixels that say what is behind it are taken
+PRIOR_REACH = 0.1  # the ring continues into a region only as far as this share of a Gaussian window is ring
 GAIN_MIN_LEVEL = 0.05  # pixels darker than this in either picture are left out of the global brightness ratio
 GAIN_STRIDE = 3  # the global brightness ratio looks at every this-many-th pixel in each direction
 
@@ -256,4 +260,135 @@ def stack_clean(target: np.ndarray, sources: list[np.ndarray], work_dim: int) ->
         replaced_fraction=float(1.0 - weights[0][np.any(covered[1:], axis=0)].mean()),
         feather_sigma=feather_sigma,
         median=median,
+    )
+
+
+def ring_prior(image: np.ndarray, ring: np.ndarray, sigma: float) -> np.ndarray:
+    """What `image` would look like inside a region, extended smoothly from the `ring` pixels around it.
+
+    The ring pixels are averaged under a Gaussian of `sigma`; deeper into the region than the ring's reach the result fades to the
+    ring's median colour. Returns a float32 (rows, cols, 3) array.
+    """
+    weight = ring.astype(np.float32)
+    reach = cv2.GaussianBlur(weight, (0, 0), sigma)
+    smooth = cv2.GaussianBlur(image * weight[..., None], (0, 0), sigma) / np.maximum(reach, 1e-6)[..., None]
+    fallback = np.median(image[ring], axis=0)
+    fade = np.clip(reach / PRIOR_REACH, 0.0, 1.0)[..., None]
+    return (fallback + (smooth - fallback) * fade).astype(np.float32)
+
+
+def pairwise_plate(layers: list[np.ndarray], covered: list[np.ndarray], sigma: float) -> np.ndarray:
+    """A float32 plate: at each pixel the mean of the two covering layers that are closest to each other, the distance smoothed by `sigma`.
+
+    Two layers that match are most likely both showing the background. It is wrong where a person is at the same place in two
+    layers; where fewer than two layers cover, the plate is layer 0.
+    """
+    plate = layers[0].copy()
+    best = np.full(layers[0].shape[:2], np.inf, dtype=np.float32)
+    for i in range(len(layers)):
+        for j in range(i + 1, len(layers)):
+            distance = cv2.GaussianBlur(np.abs(layers[i] - layers[j]).max(axis=-1).astype(np.float32), (0, 0), sigma)
+            closer = covered[i] & covered[j] & (distance < best)
+            best[closer] = distance[closer]
+            plate[closer] = (layers[i][closer] + layers[j][closer]) / 2
+    return plate
+
+
+def choose_plate(pairwise: np.ndarray, median: np.ndarray, trusted: np.ndarray, sigma: float, ring_radius: int) -> np.ndarray:
+    """The `pairwise` plate, except in each area where it is over `PLATE_DIFF` from the `median`, the median is `trusted` and fits the surroundings better.
+
+    The two plates fail in different places (the pairwise one where a person is at the same spot in two layers, the median where a
+    person is in most layers), so they mostly agree. Each connected area where they differ is judged on its own: both are compared with
+    the `ring_prior` of the calm pixels (where the plates agree) within `ring_radius`, and the one with the smaller median
+    largest-channel distance inside the area wins; ties go to the pairwise plate. The median is only a candidate where it is
+    `trusted` over at least `TRUST_FRACTION` of the area: where no majority of layers agree it is an arbitrary mix, not a background.
+    """
+    gap = cv2.GaussianBlur(np.abs(pairwise - median).max(axis=-1).astype(np.float32), (0, 0), sigma)
+    differing = gap > PLATE_DIFF
+    _, areas = cv2.connectedComponents(differing.astype(np.uint8))
+    plate = pairwise.copy()
+    grow = disk(ring_radius)
+    for index, box in enumerate(ndimage.find_objects(areas), start=1):
+        crop = tuple(slice(max(s.start - ring_radius, 0), s.stop + ring_radius) for s in box)
+        inside = areas[crop] == index
+        if trusted[crop][inside].mean() < TRUST_FRACTION:
+            continue
+        ring = cv2.dilate(inside.astype(np.uint8), grow).astype(bool) & ~differing[crop]
+        if not ring.any():
+            plate[crop][inside] = median[crop][inside]
+            continue
+        prior = ring_prior(median[crop], ring, sigma=max(inside.shape) / 4.0)
+        pairwise_error, median_error = (float(np.median(np.abs(image[crop] - prior).max(axis=-1)[inside])) for image in (pairwise, median))
+        if median_error < pairwise_error:
+            plate[crop][inside] = median[crop][inside]
+    return plate
+
+
+def plate_labels(deviation: np.ndarray, covered: list[np.ndarray], blobs: np.ndarray, own_grow: int) -> np.ndarray:
+    """An int16 label per pixel: 0 the target, k frame k, `len(deviation)` the plate (index 0 of `deviation` is the target).
+
+    `deviation` is each layer's distance from the plate (`deviation_maps`). A blob where the target's mean deviation is already under
+    `CLEAN_MEAN` is left alone: it is people who stay, which the plate is made of, not people to remove. Otherwise the blob goes
+    whole to the covering frame with the lowest mean deviation there, if that is under `CLEAN_MEAN`; where that frame has a person of
+    its own (deviation over `BAD_DEVIATION`, grown by `own_grow`, which must exceed the feather so it cannot bring the person back) the pixel takes the plate. A blob with no such frame takes the plate whole.
+    """
+    plate_label = len(deviation)
+    labels = np.zeros(blobs.shape, dtype=np.int16)
+    grow = disk(own_grow)
+    for index, box in enumerate(ndimage.find_objects(blobs), start=1):
+        if box is None:
+            continue
+        inside = blobs[box] == index
+        if deviation[0][box][inside].mean() < CLEAN_MEAN:
+            continue
+        crop = labels[box]
+        usable = [
+            (float(deviation[frame][box][inside].mean()), frame)
+            for frame in range(1, len(deviation))
+            if covered[frame][box][inside].mean() >= COVER_FRACTION
+        ]
+        usable = [item for item in usable if item[0] < CLEAN_MEAN]
+        if not usable:
+            crop[inside] = plate_label
+            continue
+        _, frame = min(usable)
+        crop[inside] = frame
+        own_person = cv2.dilate((inside & (deviation[frame][box] > BAD_DEVIATION)).astype(np.uint8), grow).astype(bool)
+        crop[inside & own_person] = plate_label
+    return labels
+
+
+def stack_clean2(target: np.ndarray, sources: list[np.ndarray], work_dim: int) -> StackResult:
+    """Like `stack_clean`, but the clean plate comes from the closest pair of layers at each pixel (`pairwise_plate`) checked against the median (`choose_plate`).
+
+    The blobs are where the target is far from the plate (`deviation_maps`). Each takes one frame (`plate_labels`), the plate filling in
+    where that frame has a person of its own. The plate is in `StackResult.median`.
+    """
+    full_target_shape = target.shape[:2]
+    target = downsample_image(target, work_dim)
+    scale = max(target.shape[:2]) / REFERENCE_DIM
+    frames = [align_frame_homography(target, full_target_shape, source, work_dim) for source in sources]
+
+    correct_gains(target, frames, compare_to_median(target, frames, scale)[3], scale)
+    layers, covered, median, median_deviation = compare_to_median(target, frames, scale)
+    sigma = DEVIATION_SIGMA * scale
+    trusted = trusted_median(median_deviation, covered, AGREE_BELOW)
+    plate = choose_plate(pairwise_plate(layers, covered, sigma), median, trusted, sigma, round(RING_RADIUS * scale))
+    deviation = deviation_maps(layers, covered, plate, sigma)
+    blobs = foreground_blobs(deviation[0], STRONG, WEAK, round(CLOSE_RADIUS * scale), round(GROW_RADIUS * scale), round(MIN_AREA * scale**2))
+    labels = plate_labels(deviation, covered, blobs, round(HOLE_SIGMAS * FEATHER_SIGMA * scale))
+
+    feather_sigma = FEATHER_SIGMA * scale
+    weights = label_weights(labels, [frame.coverage for frame in frames] + [covered[0]], feather_sigma)
+    return StackResult(
+        target=target,
+        target_sharpness=None,
+        frames=frames,
+        labels=labels,
+        weights=weights,
+        result=composite(target, [frame.aligned for frame in frames] + [plate], weights),
+        replaced_fraction=float(1.0 - weights[0][np.any(covered[1:], axis=0)].mean()),
+        feather_sigma=feather_sigma,
+        median=plate,
+        plate_is_median=False,
     )

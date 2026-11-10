@@ -1,10 +1,10 @@
 """Focus Stack: correct a picture by painting patches that show other frames of the same scene.
 
-    python focus_stack.py [--mode focus|clean] target.tif frame1.tif [frame2.tif ...]
+    python focus_stack.py [--mode focus|clean|clean2] target.tif frame1.tif [frame2.tif ...]
     python focus_stack.py --lightroom <request file>          from the Lightroom plug-in (plugin/stack_bridge.py)
 
 focus (the default) repairs blurred regions of a panorama with sharper frames; clean removes people and anything else that
-moved, using frames shot from the same spot.  With --lightroom the pictures, mode and output come from the request file, the window has
+moved, using frames shot from the same spot (clean2 builds its clean plate differently).  With --lightroom the pictures, mode and output come from the request file, the window has
 Save to Lightroom and Cancel buttons, and the exit code is 0 (saved), 1 (closed without saving) or 2 (error).
 """
 import argparse
@@ -20,7 +20,7 @@ from plugin import stack_bridge
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """The parsed command line; exits with a usage error unless it has a target and frames, or a Lightroom request, and not both."""
     parser = argparse.ArgumentParser(description="Focus Stack: paint patches of other frames over a picture")
-    parser.add_argument("--mode", choices=["focus", "clean"], default="focus", help="what to stack for (default %(default)s)")
+    parser.add_argument("--mode", choices=["focus", "clean", "clean2"], default="focus", help="what to stack for; clean2 is clean with a plate made from the closest pair of frames at each pixel (default %(default)s)")
     parser.add_argument("target", nargs="?", help="the picture to repair, e.g. the Lightroom panorama")
     parser.add_argument("frames", nargs="*", help="extra frames covering the same scene")
     parser.add_argument("--work-dim", type=int, default=REFERENCE_DIM, help="long side in pixels of the preview you paint on (default %(default)s)")

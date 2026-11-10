@@ -1,4 +1,4 @@
-"""Tests for nss.focus_stack.clean: the median layer, its trust test, the foreground blobs and the automatic labels."""
+"""Tests for nss.focus_stack.clean: the median layer, its trust test, the foreground blobs, the automatic labels and the clean2 plate."""
 import cv2
 import numpy as np
 
@@ -6,10 +6,15 @@ from nss.focus_stack.clean import (
     align_frame_homography,
     suggest_layer,
     auto_labels,
+    choose_plate,
     deviation_maps,
     foreground_blobs,
     global_gain,
+    pairwise_plate,
+    plate_labels,
+    ring_prior,
     stack_clean,
+    stack_clean2,
     trusted_median,
 )
 from nss.focus_stack.register_test import corner_error, make_homography, make_texture
@@ -307,3 +312,107 @@ def test_global_gain_is_the_median_ratio_and_ignores_a_big_object() -> None:
     gain = global_gain(target, frame, np.ones((40, 60), dtype=bool))
     assert gain.shape == (3,) and np.allclose(gain, 1.25, atol=0.01)
     assert np.allclose(global_gain(target, frame, np.zeros((40, 60), dtype=bool)), 1.0)
+
+
+
+def test_stack_clean2_removes_a_person_that_is_elsewhere_in_the_other_frames() -> None:
+    """Same scene as `stack_clean`: the target's person is replaced by background and everything away from it is untouched."""
+    target, frames = make_people_pair()
+    plan = stack_clean2(target, frames, work_dim=640)
+    assert plan.weights.shape == (5, *SHAPE) and plan.median.shape == (*SHAPE, 3)
+    assert not plan.plate_is_median
+    assert np.allclose(plan.weights.sum(axis=0), 1.0, atol=1e-5)
+    row, col = PERSON_SPOTS[0]
+    person = (slice(row + 5, row + 65), slice(col + 5, col + 35))
+    assert np.abs(plan.result - make_background())[person].mean() < 0.06
+    far = np.ones(SHAPE, dtype=bool)
+    far[max(0, row - 40):row + 110, max(0, col - 40):col + 80] = False
+    assert np.abs(plan.result - target)[far].max() < 1e-4
+
+
+
+def flat_layers(levels: list[float], shape: tuple[int, int] = (30, 40)) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """One flat RGB layer per level and a full-coverage map for each."""
+    return [np.full((*shape, 3), level, dtype=np.float32) for level in levels], [np.ones(shape, dtype=bool) for _ in levels]
+
+
+def test_ring_prior_continues_the_ring_into_the_region_and_fades_to_its_median_colour() -> None:
+    """A ring of a smooth ramp is extended inward; far from the ring the colour is the ring's median."""
+    shape = (30, 44)
+    image = np.zeros((*shape, 3), dtype=np.float32)
+    image[...] = np.linspace(0.2, 0.6, shape[1], dtype=np.float32)[None, :, None]
+    ring = np.zeros(shape, dtype=bool)
+    ring[4:26, 10:34] = True
+    ring[8:22, 14:30] = False
+    prior = ring_prior(image, ring, sigma=3.0)
+    assert prior.shape == (*shape, 3) and prior.dtype == np.float32
+    assert abs(prior[15, 15, 0] - image[15, 15, 0]) < 0.06
+    assert abs(prior[15, 22, 0] - np.median(image[ring][:, 0])) < 0.06
+
+
+def test_pairwise_plate_is_the_mean_of_the_two_closest_covering_layers() -> None:
+    """Layers 2 and 3 agree where layers 0 and 1 show the same person; layer 1 does not cover there, so it cannot match layer 0."""
+    layers, covered = flat_layers([0.30, 0.30, 0.30, 0.45])
+    layers[0][5:15, 8:20] = 0.9                              # a person in layer 0 ...
+    layers[1][5:15, 8:20] = 0.9                              # ... and at the same place in layer 1, which does not cover there
+    covered[1][5:15, 8:20] = False
+    layers[2][5:15, 8:20] = 0.30
+    layers[3][5:15, 8:20] = 0.45
+    plate = pairwise_plate(layers, covered, sigma=0.5)
+    assert plate.shape == (30, 40, 3) and plate.dtype == np.float32
+    assert np.allclose(plate[7:13, 10:18], 0.375, atol=1e-5)  # layers 2 and 3
+    assert np.allclose(plate[20:, 25:], 0.30, atol=1e-5)
+
+
+def test_choose_plate_takes_the_median_or_the_pairwise_plate_by_which_fits_the_surroundings() -> None:
+    """Where the plates differ, the one that continues the calm 0.5 around the area wins; where they agree nothing changes."""
+    pairwise = np.full((30, 40, 3), 0.5, dtype=np.float32)
+    median = pairwise.copy()
+    pairwise[5:10, 5:12] = 0.1                               # the pairwise plate has a dark spot, the median is close to its surroundings
+    median[5:10, 5:12] = 0.52
+    median[18:25, 25:34] = 0.9                               # the median has a person, the pairwise plate is close to its surroundings
+    pairwise[18:25, 25:34] = 0.48
+    trusted = np.ones((30, 40), dtype=bool)
+    plate = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
+    assert plate.shape == (30, 40, 3) and plate.dtype == np.float32
+    assert np.allclose(plate[6:9, 6:11], 0.52, atol=1e-5)
+    assert np.allclose(plate[19:24, 26:33], 0.48, atol=1e-5)
+    assert np.allclose(plate[:4], 0.5)
+    trusted[5:10, 5:12] = False                              # no majority of layers backs the median there: the pairwise plate stays
+    plate = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
+    assert np.allclose(plate[6:9, 6:11], 0.1, atol=1e-5)
+
+
+def test_plate_labels_give_each_blob_to_its_cleanest_frame_and_the_plate_where_there_is_none() -> None:
+    """Frame 1 is the cleanest over blob 1 apart from a small person of its own, which takes the plate; blob 2 has no clean frame."""
+    deviation = np.zeros((4, 30, 40), dtype=np.float32)
+    deviation[0, 10:20, 3:15] = 0.3                          # the target's people
+    deviation[0, 5:12, 25:38] = 0.3
+    deviation[1] = 0.01
+    deviation[1, 12:14, 6:10] = 0.2                          # frame 1's own person
+    deviation[2] = 0.10
+    deviation[3] = 0.03
+    deviation[1:, 5:12, 25:38] = 0.2                         # blob 2: every frame is far from the plate
+    blobs = np.zeros((30, 40), dtype=np.int32)
+    blobs[10:20, 3:15], blobs[5:12, 25:38] = 1, 2
+    covered = [np.ones((30, 40), dtype=bool) for _ in range(4)]
+    labels = plate_labels(deviation, covered, blobs, own_grow=1)
+    assert labels.shape == (30, 40) and labels.dtype == np.int16
+    assert (labels[12:14, 6:10] == 4).all() and labels[18, 13] == 1 and labels[10, 3] == 1
+    assert (labels[5:12, 25:38] == 4).all() and (labels[blobs == 0] == 0).all()
+    covered[1][10:20, 3:15] = False                          # frame 1 does not cover blob 1: frame 3 is the cleanest left
+    assert (plate_labels(deviation, covered, blobs, own_grow=1)[10:20, 3:15] == 3).all()
+
+
+def test_plate_labels_leave_a_blob_alone_where_the_target_is_already_close_to_the_plate() -> None:
+    """People who stay are what the plate is made of: the target deviates a little over a blob, so no frame replaces it."""
+    deviation = np.zeros((3, 30, 40), dtype=np.float32)
+    deviation[0, 10:20, 3:15] = 0.03                         # under CLEAN_MEAN on average, yet some pixels are over BAD_DEVIATION
+    deviation[0, 12:14, 5:9] = 0.09
+    deviation[1:] = 0.01
+    blobs = np.zeros((30, 40), dtype=np.int32)
+    blobs[10:20, 3:15] = 1
+    covered = [np.ones((30, 40), dtype=bool) for _ in range(3)]
+    assert (plate_labels(deviation, covered, blobs, own_grow=1) == 0).all()
+    deviation[0, 10:20, 3:15] = 0.3                          # a real person: the cleanest frame takes the blob
+    assert (plate_labels(deviation, covered, blobs, own_grow=1)[10:20, 3:15] == 1).all()

@@ -121,3 +121,25 @@ is clean, otherwise the median) instead of the next layer; Tab still cycles in p
 from that strip's own warped frames, and only for strips where some pixel uses it; a frame with no weight in a strip is not read.
 
 The constants (`clean.py`) were tuned on one scene of five frames and are the first thing to retune.  Use 3 or more extra frames; 5 or more is better.
+
+## Clean mode 2 (`--mode clean2`): a plate from the closest pairs
+
+Same inputs as clean mode, working size only.  It differs in how the clean plate is made and how a blob is filled.
+
+1. **Align** and match brightness as in clean mode.
+2. **Pairwise plate** (`pairwise_plate`): at each pixel the mean of the two covering layers that are closest to each other (distance smoothed by
+   `DEVIATION_SIGMA`).  Two layers that match are most likely both the background, so people who walk through are removed even when they
+   are in most of the frames.  It is wrong where a person is at the same place in two layers.
+3. **Check against the median** (`choose_plate`): the pairwise plate and the median fail in different places, so they mostly agree.  Each
+   connected area where they differ by more than `PLATE_DIFF` takes whichever fits the calm pixels around it better (`ring_prior`, the
+   plates' agreeing pixels extended smoothly into the area).  The plate is in `StackResult.median` and is the last layer.
+4. **Blobs** (`foreground_blobs`): where the target is far from the plate, with the thresholds of clean mode.
+5. **Labels** (`plate_labels`): a blob where the target's mean distance from the plate is already under `CLEAN_MEAN` is left as shot: it is people
+   who stay, and the plate is made of them (the pair of frames that matched is the same group), so replacing them only corrupts them.  Any
+   other blob goes whole to the covering frame closest to the plate, if it is clean over the blob; where that frame has a person of its
+   own the pixel takes the plate.  A blob with no clean frame takes the plate whole.  People left as shot are for the patch tool.
+
+In the window, `python focus_stack.py --mode clean2 target.tif frame1.tif ...` starts from the same stack, and the last layer is listed as "Clean plate"
+(not "(median)") because it is not a median.  The plate cannot be recomputed strip by strip from the warped frames, so a full-size render
+(Ctrl+S, or `--full-res`) resamples the working-size plate (`StackResult.median`, flagged by `plate_is_median` = False) where a region uses it; everything else
+is rendered from the full-size frames as before.  Setting a frame as the target restacks with clean2 again.

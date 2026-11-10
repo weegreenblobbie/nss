@@ -237,6 +237,24 @@ def test_render_full_with_the_median_layer_tiles_shrinks_and_removes_the_person(
     assert np.abs(untiled - make_background())[person].mean() < 0.08
 
 
+def test_render_full_shows_a_given_plate_instead_of_recomputing_the_median() -> None:
+    """With a working-size plate the last layer is that plate resampled, the strips agree, and nothing else changes."""
+    from nss.focus_stack.clean import stack_clean
+    from nss.focus_stack.clean_test import make_people_pair
+    target, frames = make_people_pair()
+    plan = stack_clean(target, frames, work_dim=480)
+    weights = np.zeros_like(plan.weights)
+    weights[0] = 1.0
+    weights[0, 150:202, 225:255] = 0.0
+    weights[-1, 150:202, 225:255] = 1.0
+    plate = np.full_like(plan.median, 0.25)
+    untiled = render_full(target, frames, plan.frames, weights, tile_rows=target.shape[0], plate=plate)
+    tiled = render_full(target, frames, plan.frames, weights, tile_rows=130, plate=plate)
+    assert np.abs(tiled - untiled).max() < 1e-4
+    assert np.allclose(untiled[230:260, 310:330], 0.25, atol=1e-4)           # inside the box at the full size
+    assert np.allclose(untiled[:100], target[:100], atol=1e-6)
+
+
 def test_render_strip_skips_layers_with_no_weight_in_the_strip() -> None:
     """A frame with zero weight is not even read: a source full of NaN does not reach the picture, and the median is skipped likewise."""
     from nss.focus_stack.clean import stack_clean
@@ -283,5 +301,13 @@ def test_main_clean_mode_full_res_writes_the_target_size(tmp_path: Path) -> None
     """--mode clean --full-res renders the target's own size, with the median computed strip by strip."""
     paths = clean_files(tmp_path)
     code = main([*paths, "-o", str(tmp_path / "out.tif"), "--work-dim", "480", "--mode", "clean", "--full-res", "--tile-rows", "200"])
+    assert code == 0
+    assert TiffFile().read(str(tmp_path / "out.tif")).array.shape == (480, 640, 3)
+
+
+def test_main_clean2_mode_full_res_writes_the_target_size(tmp_path: Path) -> None:
+    """--mode clean2 --full-res renders the target's own size, resampling the plate."""
+    paths = clean_files(tmp_path)
+    code = main([*paths, "-o", str(tmp_path / "out.tif"), "--work-dim", "480", "--mode", "clean2", "--full-res", "--tile-rows", "200"])
     assert code == 0
     assert TiffFile().read(str(tmp_path / "out.tif")).array.shape == (480, 640, 3)
