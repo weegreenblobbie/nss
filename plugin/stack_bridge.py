@@ -3,7 +3,7 @@ Hand-over files between the Lightroom Classic plug-in's "Stack" menu items (nss.
 
 The plug-in exports the selected photos as 16-bit Adobe RGB TIFFs and writes a request file of `key=value` lines:
 
-    mode=clean|focus      what to stack for (nss/focus_stack/README.md)
+    mode=clean|clean2|focus  what to stack for (nss/focus_stack/README.md)
     target=<tiff>         the first photo: the picture that is corrected
     count=N               how many frames follow, then frame.1=<tiff> ... frame.N=<tiff>
     output=<path>         full path of the TIFF to write when the result is saved with the target as it was sent (photo 0), then
@@ -25,7 +25,7 @@ from plugin.handover import read_values
 
 SAVED, CANCELLED, ERROR = "saved", "cancelled", "error"
 EXIT_CODES = {SAVED: 0, CANCELLED: 1, ERROR: 2}
-MODES = ("clean", "focus")
+MODES = ("clean", "clean2", "focus")
 DEFAULT_WORK_DIM = 3000  # the working size of nss.focus_stack.stack.REFERENCE_DIM, repeated so the plug-in side needs no nss imports
 
 

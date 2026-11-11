@@ -95,16 +95,16 @@ class SaveThread(QtCore.QThread):
         frames: list[AlignedFrame],
         weights: np.ndarray,
         path: str,
-        plate: np.ndarray | None = None,
+        plate_mix: np.ndarray | None = None,
     ) -> None:
-        """A thread that will render with `weights` (a snapshot, so later edits do not matter) and write `path` once started; `plate` is as for `render_strip`."""
+        """A thread that will render with `weights` (a snapshot, so later edits do not matter) and write `path` once started; `plate_mix` is as for `render_strip`."""
         super().__init__()
         self.target_file = target_file
         self.frame_arrays = frame_arrays
         self.frames = frames
         self.weights = weights
         self.path = path
-        self.plate = plate
+        self.plate_mix = plate_mix
 
     def run(self) -> None:
         """Emits saved, or failed on an exception."""
@@ -113,7 +113,7 @@ class SaveThread(QtCore.QThread):
             out = np.empty_like(target)
             for first in range(0, target.shape[0], TILE_ROWS):
                 last = min(first + TILE_ROWS, target.shape[0])
-                out[first:last] = render_strip(target, self.frame_arrays, self.frames, self.weights, first, last, self.plate)
+                out[first:last] = render_strip(target, self.frame_arrays, self.frames, self.weights, first, last, self.plate_mix)
                 self.progress.emit(last)
             result = copy.copy(self.target_file)
             result.array = out
@@ -295,8 +295,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.save_action.setEnabled(False)
-        plate = None if self._plan.plate_is_median else self._plan.median
-        thread = SaveThread(self._target_file, self._frame_arrays, self._plan.frames, self.canvas.state.weights(), path, plate)
+        thread = SaveThread(self._target_file, self._frame_arrays, self._plan.frames, self.canvas.state.weights(), path, self._plan.plate_mix)
         thread.progress.connect(self.progress_bar.setValue)
         thread.saved.connect(self._on_saved)
         thread.failed.connect(self._on_save_failed)

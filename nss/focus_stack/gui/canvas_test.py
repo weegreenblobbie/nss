@@ -447,3 +447,19 @@ def test_hovering_a_pin_shows_a_pointing_hand_and_leaving_it_restores_the_brush(
     QTest.mouseMove(view, point(view, 20.0, 45.0))
     assert view.cursor().shape() == Qt.CursorShape.BlankCursor
     assert view.hovered_pin() is None
+
+
+def test_tint_is_clear_under_the_active_patch_until_it_is_deselected() -> None:
+    """With the tint on, the active patch is untinted and the rest keeps its tint; Esc tints the patch again."""
+    view, state = make_view()
+    view.radius = 4.0
+    view.toggle_tint()
+    drag(view, [(70.0, 30.0), (72.0, 30.0)])
+    view._tint()
+    inside = state.active_mask()
+    assert inside.any() and not (~inside).all()
+    assert not view._tint_array[inside].any()
+    assert view._tint_array[~inside].any()
+    QTest.keyClick(view, Qt.Key.Key_Escape)
+    view._tint()
+    assert view._tint_array[inside].any()

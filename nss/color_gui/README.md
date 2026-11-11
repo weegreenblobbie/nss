@@ -69,9 +69,12 @@ Random Shift moves the sliders at random toward the Color Harmony samples (harmo
 * **Grading** (checkbox): each sample's displayed colour goes to the tonal wheel whose mask is strongest at its luminance (current Balance and
   Blending, `tonal_zone`).  A wheel with samples gets hue = the wheel hue (less Rotation) of one of its samples picked at random + r * strength * 360,
   and sat + r * strength and light + r * strength added to its own values; wheels without samples, Global, Blending and Balance are kept.
-* The button is enabled only with a sample and a checkbox checked.  Each click starts from the current sliders and is one undo step; in Explore
-  Mode it re-rolls the 8 outer images instead.  Explore Mode surrounds the centre with 8 independent shifts of it, or shows the centre only
-  (with a status message) when Random Shift is not ready.
+* **No samples** (`random_look`): Shadows, Midtones and Highlights move at random; a wheel with sat 0 gets a uniformly random hue, a wheel
+  with colour gets its hue + r * strength * 360; sat + |r| * strength, light + r * strength.  The mixer, Global, Blending and Balance are kept.
+  The label under the button says which of the two shifts a click makes.
+* The button is enabled with Grading checked, or Mixer checked and a sample (the mixer shift needs sampled colours).  Each click starts from
+  the current sliders and is one undo step; in Explore Mode it re-rolls the 8 outer images instead.  Explore Mode surrounds the centre with 8
+  independent shifts of it, or shows the centre only (with a status message) when Random Shift is not ready.
 * The Activate Explore Mode checkbox is enabled under the same condition (its tooltip says what is missing), and stays enabled while Explore Mode
   is on so it can be left; unchecking Mixer and Grading then only disables Random Shift and leaves the grid as it is.
   Samples cannot be removed in Explore Mode (Reset Harmony and the sample menu's Remove are disabled), so the grid always has the samples it was rolled from.
@@ -112,7 +115,8 @@ mixer on the full image uncached.
 `python color.py --lightroom <request file>` is started by the Lightroom plug-in (`plugin/`; file format in `plugin/lr_bridge.py`).  The
 request's TIFF is loaded and the Color Mixer, the four wheels (Global included), Blending and Balance start at its Lightroom values (one undo
 step after the neutral load).  Apply to Lightroom (status bar) writes them to the result file, hues with Rotation added as graded, and
-exits 0; closing the window any other way exits 1 and writes nothing.
+exits 0; closing the window any other way exits 1 and writes nothing.  A black and white photo (a request without mixer keys,
+`Request.grayscale`) hides the Color Mixer, Color Harmony and the Mixer checkbox (unchecked), so Random Shift makes random looks.
 
 ## Tests
 

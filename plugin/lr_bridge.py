@@ -2,10 +2,10 @@
 Hand-over files between the Lightroom Classic plug-in (lightroom/nss.lrdevplugin) and the nss color GUI.
 
 The plug-in writes a request file of `key=value` lines: `tiff` (the exported picture, everything but the mixer and the color wheels baked in), `result` (where to write the answer)
-and the current Lightroom develop settings of the 24 mixer sliders and the color grading wheels under Lightroom's own key names.  The GUI starts its sliders from them and, when
+and the current Lightroom develop settings of the 24 mixer sliders and the color grading wheels under Lightroom's own key names (a black and white photo has no mixer keys: its mixer reads as 0 and req.grayscale is True).  The GUI starts its sliders from them and, when
 you press Apply, writes the same keys to the result file; the plug-in applies them to the photo.  No result file (or a non-zero exit) means: leave the photo alone.
 
-    req = read_request(path)            # req.tiff, req.result, req.mixer {"hue","sat","lum"}, req.wheels {"shadows","midtones","highlights","global"}, req.blending, req.balance
+    req = read_request(path)            # req.tiff, req.result, req.mixer {"hue","sat","lum"}, req.wheels {"shadows","midtones","highlights","global"}, req.blending, req.balance, req.grayscale
     write_result(req.result, mixer, wheels, blending, balance)
 
 Units are Lightroom's: mixer -100..100; wheels (hue 0..359, sat 0..100, lum -100..100); blending 0..100; balance -100..100.  The mixer / wheel arguments are the ones of
@@ -36,6 +36,7 @@ class Request:
     wheels: dict
     blending: float
     balance: float
+    grayscale: bool     # a black and white photo: the request has no mixer keys
 
 
 def _number(values, key, default):
@@ -51,7 +52,9 @@ def read_request(path):
         raise ValueError(f"{path}: request needs tiff= and result= lines")
     mixer = {name: [_number(v, prefix + band, 0.0) for band in BANDS] for name, prefix in MIXER}
     wheels = {name: tuple(_number(v, key, 0.0) for key in keys) for name, keys in WHEEL_KEYS.items()}
-    return Request(v["tiff"], v["result"], mixer, wheels, _number(v, BLENDING_KEY, DEFAULT_BLENDING), _number(v, BALANCE_KEY, DEFAULT_BALANCE))
+    grayscale = not any(prefix + band in v for _, prefix in MIXER for band in BANDS)
+    return Request(v["tiff"], v["result"], mixer, wheels, _number(v, BLENDING_KEY, DEFAULT_BLENDING), _number(v, BALANCE_KEY, DEFAULT_BALANCE),
+                   grayscale)
 
 
 def _clamp(x, lo, hi):

@@ -32,6 +32,25 @@ def test_missing_keys_take_neutral_values(tmp_path):
     assert req.mixer["hue"] == [0.0] * 8 and req.wheels["shadows"] == (0.0, 0.0, 0.0) and req.blending == 50 and req.balance == 0
 
 
+def test_black_and_white_request_has_wheels_and_a_neutral_mixer(tmp_path):
+    """A black and white photo's request has no Color Mixer keys, only the wheels."""
+    path = tmp_path / "r.txt"
+    path.write_text("tiff=a.tif\nresult=b.txt\nSplitToningShadowHue=210\nSplitToningShadowSaturation=25\nColorGradeShadowLum=-7\n"
+                    "SplitToningHighlightHue=45\nColorGradeBlending=65\nSplitToningBalance=-15\n", encoding="utf-8")
+    req = lb.read_request(str(path))
+    assert req.mixer == {"hue": [0.0] * 8, "sat": [0.0] * 8, "lum": [0.0] * 8}
+    assert req.wheels["shadows"] == (210.0, 25.0, -7.0) and req.wheels["highlights"] == (45.0, 0.0, 0.0)
+    assert req.blending == 65 and req.balance == -15 and req.grayscale
+
+
+def test_a_request_with_mixer_keys_is_not_grayscale(tmp_path):
+    """One mixer key is enough: the photo is a colour photo."""
+    path = tmp_path / "r.txt"
+    path.write_text("tiff=a.tif\nresult=b.txt\nHueAdjustmentRed=3\n", encoding="utf-8")
+    req = lb.read_request(str(path))
+    assert not req.grayscale and req.mixer["hue"][0] == 3.0
+
+
 def test_request_needs_paths(tmp_path):
     path = tmp_path / "r.txt"
     path.write_text("HueAdjustmentRed=3\n", encoding="utf-8")

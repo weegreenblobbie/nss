@@ -428,5 +428,5 @@ def test_open_in_clean2_mode_lists_the_plate_and_saves_with_it(files: dict) -> N
     window.save_to(out)
     window._save_thread.wait(60000)
     QApplication.processEvents()
-    expected = render_full(files["target_file"].array, files["frames"], window._plan.frames, weights, 256, window._plan.median)
+    expected = render_full(files["target_file"].array, files["frames"], window._plan.frames, weights, 256, window._plan.plate_mix)
     assert np.abs(TiffFile().read(out).array - expected).max() <= 1.5 / 65535

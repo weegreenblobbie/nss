@@ -14,7 +14,7 @@ below) and are untested.
 
 * `nss.lrdevplugin/` - the plug-in folder you add to Lightroom (`Info.lua`,
   `Config.lua`, `Common.lua`, `EditWithNss.lua`, `DumpSettings.lua`, `Keys.lua`,
-  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`, `ICM.lua`, `Stack.lua`, `StackClean.lua`, `StackFocus.lua`).
+  `CenterMoon.lua`, `VerifyMoon.lua`, `Moon.lua`, `ICM.lua`, `Stack.lua`, `StackClean.lua`, `StackClean2.lua`, `StackFocus.lua`).
 * `nss_color.bat` - the launcher Lightroom runs: starts
   `color.py --lightroom <request file>` with the repo's `venv` Python.
 * `nss_moon.bat` - the moon launcher: starts `moon.py --request <request file>`.
@@ -53,6 +53,11 @@ below) and are untested.
    Grading set to neutral (everything else baked in) into Lightroom's temp
    folder (`nss_color`), then puts the photo's values back.  The GUI opens with
    its sliders at the photo's values.
+   A black and white photo has no Color Mixer (Lightroom gives it the B&W
+   mixer instead): only its Color Grading is neutralized and handed over,
+   its B&W mixer stays baked into the TIFF and only the wheels are applied back.
+   The GUI hides its Color Mixer and Color Harmony for such a photo; Random
+   Shift and Explore Mode then make random looks of the wheels.
 3. Edit, then press **Apply to Lightroom** in the GUI's status bar.  The values
    are applied to the photo as one undo step, `nss.Color`.  Closing the window
    without Apply leaves the photo unchanged.
@@ -73,9 +78,9 @@ below) and are untested.
    the window with an unsaved motion asks whether to save to Lightroom first;
    closing it without saving changes nothing.
 
-## Stack: Clean and Stack: Focus
+## Stack: Clean v1, Stack: Clean v2 and Stack: Focus
 
-Library > Plug-in Extras > **Stack: Clean (remove people)...** or **Stack: Focus...**, with two or more photos selected (the tool is described in
+Library > Plug-in Extras > **Stack: Clean v1 (remove people)...**, **Stack: Clean v2 (remove people)...** (`--mode clean2`, whose plate is made from the closest pairs of frames) or **Stack: Focus...**, with two or more photos selected (the tool is described in
 `nss/focus_stack/README.md`; clean needs photos shot from one spot).
 
 1. The **active photo starts as the target**, the picture that is corrected: the one Lightroom highlights as the most selected, or the first selected
@@ -88,7 +93,7 @@ Library > Plug-in Extras > **Stack: Clean (remove people)...** or **Stack: Focus
    `nss_stack`; about 150 to 300 MB each at full size, so up to a few GB while the window is open) and opens them in `focus_stack.py`.
    The progress bar can cancel the export.
 3. Work in the window (paint patches, Tab through the layers), then press **Save to Lightroom** (Ctrl+S): the picture is rendered at full
-   size and written as `<name>_clean.tif` (`_focus.tif` for Stack: Focus), where `<name>` is the photo that is the target *when you save*,
+   size and written as `<name>_clean.tif` (`_clean2.tif` for Clean v2, `_focus.tif` for Stack: Focus), where `<name>` is the photo that is the target *when you save*,
    next to that photo's original (`_clean_2`, `_clean_3` ... when taken; never overwritten), then imported stacked above that photo and
    selected.  The plug-in prepares such a path for every photo it exports, and the window says which one it used.  When the folder of the
    target is not writable the picture goes to `Config.lua`'s `stackFallbackFolder` (default `Documents\nss_stack`), unstacked, and a dialog

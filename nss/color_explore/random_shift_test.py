@@ -3,7 +3,7 @@ panels, clamping and the explore grid."""
 import numpy as np
 
 from nss.color_grading.grading import Grading
-from nss.color_explore.random_shift import ShiftColors, explore_states, mixer_weights, random_shift, shift_colors, tonal_zone
+from nss.color_explore.random_shift import ShiftColors, explore_looks, explore_states, mixer_weights, random_look, random_shift, shift_colors, tonal_zone
 from nss.color_explore.state import StateNode, create_default_state
 from nss.color_mixer.hue_remap import LINEAR_PROPHOTO
 
@@ -138,3 +138,35 @@ def test_explore_states_leave_the_middle_alone() -> None:
     outer = [grid[i] for i in range(9) if i != 4]
     assert all(s != state for s in outer)
     assert len({s["midtone_hue"] for s in outer}) > 1
+
+
+def test_random_look_gives_neutral_wheels_a_hue_and_moves_coloured_ones_around_theirs() -> None:
+    """r = 0.5, strength 0.2: neutral Shadows go to hue 1.5 * 180 = 270 and sat 0 + 0.1; Midtones (sat 0.2) go from hue 100 by 36 to 136, sat
+    0.3; Highlights (sat 0.1) from 50 to 86; every light moves by 0.1.  The mixer, Global, Blending and Balance stay."""
+    state = _state()
+    state["shadow_sat"] = 0.0
+    out = random_look(state, 0.2, FixedDraws(0.5))
+    assert (out["shadow_hue"], out["shadow_sat"], out["shadow_light"]) == (270.0, 0.1, -0.3)
+    assert (out["midtone_hue"], out["midtone_sat"], out["midtone_light"]) == (136.0, 0.3, 0.3)
+    assert (out["highlight_hue"], out["highlight_sat"], out["highlight_light"]) == (86.0, 0.2, 0.4)
+    kept = [k for k in state if not k.startswith(("shadow_", "midtone_", "highlight_"))]
+    assert all(out[k] == state[k] for k in kept)
+
+
+def test_random_look_sat_grows_for_negative_draws_clamps_and_hue_wraps() -> None:
+    """r = -1, strength 1: sat 0.3 + 1 clamps to 1 (|r| always adds), light -0.4 - 1 clamps to -1, hue 200 - 360 wraps to 200; neutral
+    Midtones go to hue 0."""
+    state = _state()
+    state["midtone_sat"] = 0.0
+    out = random_look(state, 1.0, FixedDraws(-1.0))
+    assert (out["shadow_hue"], out["shadow_sat"], out["shadow_light"]) == (200.0, 1.0, -1.0)
+    assert (out["midtone_hue"], out["midtone_sat"]) == (0.0, 1.0)
+
+
+def test_explore_looks_leave_the_middle_alone() -> None:
+    """Index 4 is the centre unchanged; the 8 others are independent looks of it."""
+    state = _state()
+    grid = explore_looks(state, 0.3, np.random.default_rng(4))
+    assert len(grid) == 9 and grid[4] == state and grid[4] is not state
+    outer = [grid[i] for i in range(9) if i != 4]
+    assert all(s != state for s in outer) and len({s["shadow_hue"] for s in outer}) > 1

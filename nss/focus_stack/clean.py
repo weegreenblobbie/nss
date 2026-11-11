@@ -277,13 +277,15 @@ def ring_prior(image: np.ndarray, ring: np.ndarray, sigma: float) -> np.ndarray:
     return (fallback + (smooth - fallback) * fade).astype(np.float32)
 
 
-def pairwise_plate(layers: list[np.ndarray], covered: list[np.ndarray], sigma: float) -> np.ndarray:
-    """A float32 plate: at each pixel the mean of the two covering layers that are closest to each other, the distance smoothed by `sigma`.
+def pairwise_plate(layers: list[np.ndarray], covered: list[np.ndarray], sigma: float) -> tuple[np.ndarray, np.ndarray]:
+    """A float32 plate and, as an int16 (rows, cols, 2) array, the indices of the two layers it is the mean of at each pixel.
 
+    At each pixel the plate is the mean of the two covering layers that are closest to each other, the distance smoothed by `sigma`.
     Two layers that match are most likely both showing the background. It is wrong where a person is at the same place in two
-    layers; where fewer than two layers cover, the plate is layer 0.
+    layers; where fewer than two layers cover, the plate is layer 0 and both indices are 0.
     """
     plate = layers[0].copy()
+    pair = np.zeros((*layers[0].shape[:2], 2), dtype=np.int16)
     best = np.full(layers[0].shape[:2], np.inf, dtype=np.float32)
     for i in range(len(layers)):
         for j in range(i + 1, len(layers)):
@@ -291,11 +293,28 @@ def pairwise_plate(layers: list[np.ndarray], covered: list[np.ndarray], sigma: f
             closer = covered[i] & covered[j] & (distance < best)
             best[closer] = distance[closer]
             plate[closer] = (layers[i][closer] + layers[j][closer]) / 2
-    return plate
+            pair[closer] = (i, j)
+    return plate, pair
 
 
-def choose_plate(pairwise: np.ndarray, median: np.ndarray, trusted: np.ndarray, sigma: float, ring_radius: int) -> np.ndarray:
+def plate_mix(pair: np.ndarray, use_median: np.ndarray, layer_count: int) -> np.ndarray:
+    """A float32 (rows, cols, layer_count + 1) array: how much of each layer, then of the median, makes the plate at each pixel.
+
+    `pair` and `use_median` are from `pairwise_plate` and `choose_plate`. Each pixel's weights add up to 1: half each on its two layers, or
+    all on the median. Applied to the layers (and median) of another size, such as the full-size frames, it gives the plate there.
+    """
+    mix = np.zeros((*use_median.shape, layer_count + 1), dtype=np.float32)
+    for layer in range(layer_count):
+        mix[..., layer] = 0.5 * ((pair[..., 0] == layer).astype(np.float32) + (pair[..., 1] == layer))
+    mix[use_median] = 0.0
+    mix[use_median, layer_count] = 1.0
+    return mix
+
+
+def choose_plate(pairwise: np.ndarray, median: np.ndarray, trusted: np.ndarray, sigma: float, ring_radius: int) -> tuple[np.ndarray, np.ndarray]:
     """The `pairwise` plate, except in each area where it is over `PLATE_DIFF` from the `median`, the median is `trusted` and fits the surroundings better.
+
+    Returns that plate and the bool map of the pixels that took the median.
 
     The two plates fail in different places (the pairwise one where a person is at the same spot in two layers, the median where a
     person is in most layers), so they mostly agree. Each connected area where they differ is judged on its own: both are compared with
@@ -307,6 +326,7 @@ def choose_plate(pairwise: np.ndarray, median: np.ndarray, trusted: np.ndarray, 
     differing = gap > PLATE_DIFF
     _, areas = cv2.connectedComponents(differing.astype(np.uint8))
     plate = pairwise.copy()
+    use_median = np.zeros(plate.shape[:2], dtype=bool)
     grow = disk(ring_radius)
     for index, box in enumerate(ndimage.find_objects(areas), start=1):
         crop = tuple(slice(max(s.start - ring_radius, 0), s.stop + ring_radius) for s in box)
@@ -316,12 +336,14 @@ def choose_plate(pairwise: np.ndarray, median: np.ndarray, trusted: np.ndarray, 
         ring = cv2.dilate(inside.astype(np.uint8), grow).astype(bool) & ~differing[crop]
         if not ring.any():
             plate[crop][inside] = median[crop][inside]
+            use_median[crop][inside] = True
             continue
         prior = ring_prior(median[crop], ring, sigma=max(inside.shape) / 4.0)
         pairwise_error, median_error = (float(np.median(np.abs(image[crop] - prior).max(axis=-1)[inside])) for image in (pairwise, median))
         if median_error < pairwise_error:
             plate[crop][inside] = median[crop][inside]
-    return plate
+            use_median[crop][inside] = True
+    return plate, use_median
 
 
 def plate_labels(deviation: np.ndarray, covered: list[np.ndarray], blobs: np.ndarray, own_grow: int) -> np.ndarray:
@@ -362,7 +384,7 @@ def stack_clean2(target: np.ndarray, sources: list[np.ndarray], work_dim: int) -
     """Like `stack_clean`, but the clean plate comes from the closest pair of layers at each pixel (`pairwise_plate`) checked against the median (`choose_plate`).
 
     The blobs are where the target is far from the plate (`deviation_maps`). Each takes one frame (`plate_labels`), the plate filling in
-    where that frame has a person of its own. The plate is in `StackResult.median`.
+    where that frame has a person of its own. The plate is in `StackResult.median` and how it is made of the layers in `StackResult.plate_mix`.
     """
     full_target_shape = target.shape[:2]
     target = downsample_image(target, work_dim)
@@ -373,7 +395,8 @@ def stack_clean2(target: np.ndarray, sources: list[np.ndarray], work_dim: int) -
     layers, covered, median, median_deviation = compare_to_median(target, frames, scale)
     sigma = DEVIATION_SIGMA * scale
     trusted = trusted_median(median_deviation, covered, AGREE_BELOW)
-    plate = choose_plate(pairwise_plate(layers, covered, sigma), median, trusted, sigma, round(RING_RADIUS * scale))
+    pairwise, pair = pairwise_plate(layers, covered, sigma)
+    plate, use_median = choose_plate(pairwise, median, trusted, sigma, round(RING_RADIUS * scale))
     deviation = deviation_maps(layers, covered, plate, sigma)
     blobs = foreground_blobs(deviation[0], STRONG, WEAK, round(CLOSE_RADIUS * scale), round(GROW_RADIUS * scale), round(MIN_AREA * scale**2))
     labels = plate_labels(deviation, covered, blobs, round(HOLE_SIGMAS * FEATHER_SIGMA * scale))
@@ -391,4 +414,5 @@ def stack_clean2(target: np.ndarray, sources: list[np.ndarray], work_dim: int) -
         feather_sigma=feather_sigma,
         median=plate,
         plate_is_median=False,
+        plate_mix=plate_mix(pair, use_median, len(layers)),
     )

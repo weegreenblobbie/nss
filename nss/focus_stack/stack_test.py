@@ -237,22 +237,57 @@ def test_render_full_with_the_median_layer_tiles_shrinks_and_removes_the_person(
     assert np.abs(untiled - make_background())[person].mean() < 0.08
 
 
-def test_render_full_shows_a_given_plate_instead_of_recomputing_the_median() -> None:
-    """With a working-size plate the last layer is that plate resampled, the strips agree, and nothing else changes."""
+def test_render_full_builds_the_plate_from_the_full_size_frames_it_is_mixed_of() -> None:
+    """A plate that is all frame 1 in a box gives what frame 1 itself gives there; strips agree and the frames the mix does not use are not read."""
     from nss.focus_stack.clean import stack_clean
     from nss.focus_stack.clean_test import make_people_pair
     target, frames = make_people_pair()
     plan = stack_clean(target, frames, work_dim=480)
+    box = (slice(150, 202), slice(225, 255))
     weights = np.zeros_like(plan.weights)
     weights[0] = 1.0
-    weights[0, 150:202, 225:255] = 0.0
-    weights[-1, 150:202, 225:255] = 1.0
-    plate = np.full_like(plan.median, 0.25)
-    untiled = render_full(target, frames, plan.frames, weights, tile_rows=target.shape[0], plate=plate)
-    tiled = render_full(target, frames, plan.frames, weights, tile_rows=130, plate=plate)
+    weights[0][box] = 0.0
+    weights[-1][box] = 1.0
+    own = np.zeros_like(weights)
+    own[0] = 1.0
+    own[0][box] = 0.0
+    own[1][box] = 1.0
+    mix = np.zeros((*plan.median.shape[:2], weights.shape[0]), dtype=np.float32)
+    mix[..., 1] = 1.0
+    expected = render_full(target, frames, plan.frames, own, tile_rows=target.shape[0])
+    poisoned = [frames[0]] + [np.full_like(frame, np.nan) for frame in frames[1:]]
+    untiled = render_full(target, poisoned, plan.frames, weights, tile_rows=target.shape[0], plate_mix=mix)
+    tiled = render_full(target, poisoned, plan.frames, weights, tile_rows=130, plate_mix=mix)
+    assert not np.isnan(untiled).any()
     assert np.abs(tiled - untiled).max() < 1e-4
-    assert np.allclose(untiled[230:260, 310:330], 0.25, atol=1e-4)           # inside the box at the full size
-    assert np.allclose(untiled[:100], target[:100], atol=1e-6)
+    assert np.abs(untiled - expected).max() < 1e-4
+    assert np.abs(untiled - target).max() > 0.05             # the box really changed
+
+
+def test_render_full_mixes_the_target_and_the_median_into_the_plate() -> None:
+    """Half target and half frame 1 in the plate is the average of the two renders; all median is the median render."""
+    from nss.focus_stack.clean import stack_clean
+    from nss.focus_stack.clean_test import make_people_pair
+    target, frames = make_people_pair()
+    plan = stack_clean(target, frames, work_dim=480)
+    box = (slice(150, 202), slice(225, 255))
+    weights = np.zeros_like(plan.weights)
+    weights[0] = 1.0
+    weights[0][box] = 0.0
+    weights[-1][box] = 1.0
+    shape = (*plan.median.shape[:2], weights.shape[0])
+    half = np.zeros(shape, dtype=np.float32)
+    half[..., 0] = half[..., 1] = 0.5
+    median = np.zeros(shape, dtype=np.float32)
+    median[..., -1] = 1.0
+    plate_only_median = render_full(target, frames, plan.frames, weights, tile_rows=130)
+    assert np.abs(render_full(target, frames, plan.frames, weights, tile_rows=130, plate_mix=median) - plate_only_median).max() < 1e-4
+    first = np.zeros(shape, dtype=np.float32)
+    first[..., 1] = 1.0
+    zero = np.zeros(shape, dtype=np.float32)
+    zero[..., 0] = 1.0
+    averaged = (render_full(target, frames, plan.frames, weights, 130, first) + render_full(target, frames, plan.frames, weights, 130, zero)) / 2
+    assert np.abs(render_full(target, frames, plan.frames, weights, 130, half) - averaged).max() < 1e-4
 
 
 def test_render_strip_skips_layers_with_no_weight_in_the_strip() -> None:

@@ -63,7 +63,7 @@ threads (aligning on start, saving at the end).  You paint on the working-size p
 | Delete | delete the active patch |
 | Ctrl+Z, Ctrl+Shift+Z | undo, redo (a stroke is one step; cycling one patch repeatedly is one step) |
 | hold T | show the original target |
-| L | tint the picture by which layer each region uses |
+| L | tint the picture by which layer each region uses; the active patch is left untinted so you see the picture under it |
 | two-finger scroll or wheel | pan (a touchpad's pixel delta, or 60 pixels a mouse notch; sideways scrolling pans sideways) |
 | Ctrl+scroll or a pinch | zoom about the cursor or the fingers |
 | Space, or the Pan button | toggle pan mode: a left-drag moves the picture (open hand; closed while dragging) and nothing is painted or selected; Space or Esc leaves it |
@@ -140,6 +140,8 @@ Same inputs as clean mode, working size only.  It differs in how the clean plate
    own the pixel takes the plate.  A blob with no clean frame takes the plate whole.  People left as shot are for the patch tool.
 
 In the window, `python focus_stack.py --mode clean2 target.tif frame1.tif ...` starts from the same stack, and the last layer is listed as "Clean plate"
-(not "(median)") because it is not a median.  The plate cannot be recomputed strip by strip from the warped frames, so a full-size render
-(Ctrl+S, or `--full-res`) resamples the working-size plate (`StackResult.median`, flagged by `plate_is_median` = False) where a region uses it; everything else
-is rendered from the full-size frames as before.  Setting a frame as the target restacks with clean2 again.
+(not "(median)") because it is not a median.  The plate is chosen at the working size but built at the full size: at each pixel it is
+either the mean of two particular layers or the median, and `StackResult.plate_mix` records how much of each layer (and of the median) that is.
+A full-size render (Ctrl+S, or `--full-res`) applies the mix, upsampled, to each strip's own warped full-size frames, so the plate is as sharp as
+the frames; a frame the mix does not use in a strip is not read there.  Which pair wins is still decided at the working size, so the choice
+changes smoothly and not with the strip height.  Setting a frame as the target restacks with clean2 again.

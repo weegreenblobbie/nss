@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QApplication
 from nss.color_gui.main_window import MainWindow, ShadowsZoneWidget, MidtonesZoneWidget, HighlightsZoneWidget, GlobalZoneWidget, RENDER_DEBOUNCE_MS
 from nss.color_grading.grading import Grading
 from nss.color_mixer import ColorMixer
+from nss.color_explore.random_shift import explore_looks, random_look
 from nss.tiff_file import TiffFile
 from nss.icc import gamma_icc_bytes
 from plugin import lr_bridge
@@ -242,21 +243,45 @@ def test_explore_mode_click_halves_variation_strength() -> None:
     assert window.explore_widget.variation_strength == 0.4
 
 
-def test_random_shift_enabled_only_with_a_sample_and_a_checked_panel() -> None:
-    """Random Shift needs a Color Harmony sample and Mixer or Grading checked."""
+def test_random_shift_needs_grading_or_mixer_with_a_sample_and_the_label_says_which_shift() -> None:
+    """Random Shift needs Grading checked, or Mixer checked with a Color Harmony sample; the label under it names the shift it makes."""
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
-    assert window.randomize_btn.text() == "Random Shift" and not window.randomize_btn.isEnabled()
-    window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
-    assert window.randomize_btn.isEnabled()
-    window.explore_widget.mixer_checkbox.setChecked(False)
-    assert window.randomize_btn.isEnabled()
+    assert window.randomize_btn.text() == "Random Shift" and window.randomize_btn.isEnabled()
+    assert window.random_mode_label.text() == "No colours sampled: random grading of Shadows, Midtones and Highlights."
     window.explore_widget.grading_checkbox.setChecked(False)
     assert not window.randomize_btn.isEnabled()
-    window.explore_widget.mixer_checkbox.setChecked(True)
+    window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
+    assert window.randomize_btn.isEnabled() and window.random_mode_label.text() == "Shifting toward 1 sampled colour."
+    window.harmony_panel.add_sample(2, 5, np.array([0.2, 0.4, 0.7]), 210.0)
+    assert window.random_mode_label.text() == "Shifting toward 2 sampled colours."
+    window.explore_widget.mixer_checkbox.setChecked(False)
+    assert not window.randomize_btn.isEnabled()
+    window.explore_widget.grading_checkbox.setChecked(True)
     assert window.randomize_btn.isEnabled()
+    window.explore_widget.grading_checkbox.setChecked(False)
+    window.explore_widget.mixer_checkbox.setChecked(True)
     window.harmony_panel.clear_samples()
     assert not window.randomize_btn.isEnabled()
+    assert window.random_mode_label.text().startswith("No colours sampled")
+
+
+def test_random_shift_without_samples_is_a_random_look_of_the_current_values() -> None:
+    """No sample: each click is random_look of the sliders as they are now (the mixer stays), one undo step each."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.explore_widget.var_slider.setValue(30)
+    current = lambda: window.rebuild_state_node_from_memento(window.state_manager.capture_snapshot())
+    window.mixer_panel.sliders["hue"][2].setValue(15)
+    before = current()
+    expected = random_look(before, 0.3, np.random.default_rng(5))
+    window.rng = np.random.default_rng(5)
+    steps = len(window.state_manager.undo_stack)
+    window.on_randomize_clicked()
+    after = current()
+    assert after == expected and after != before and after["mixer_hue"][2] == 15.0
+    assert len(window.state_manager.undo_stack) == steps + 1
+    window.render_timer.stop()
 
 
 def test_random_shift_changes_only_checked_panels_from_the_current_values() -> None:
@@ -290,32 +315,47 @@ def test_random_shift_changes_only_checked_panels_from_the_current_values() -> N
     window.render_timer.stop()
 
 
-def test_explore_mode_without_a_sample_shows_the_centre_only() -> None:
-    """Without a sample Explore Mode grades only the centre, says why, and the empty outer cells cannot be promoted or edited."""
+def test_explore_mode_without_a_sample_shows_random_looks() -> None:
+    """Without a sample (Grading checked) Explore Mode surrounds the centre with 8 random_look of it."""
     app = QApplication.instance() or QApplication([])
     window = _window_with_image()
+    window.explore_widget.var_slider.setValue(30)
+    center = window.rebuild_state_node_from_memento(window.state_manager.capture_snapshot())
+    with patch('nss.color_gui.main_window.GradingWorker.start'), \
+         patch('nss.color_gui.main_window.explore_looks', wraps=explore_looks) as looks:
+        window.explore_checkbox.setChecked(True)
+    assert looks.call_args.args[:2] == (center, 0.3)
+    assert window.grid_states[4] == center and all(window.grid_states[i] != center for i in range(9) if i != 4)
+
+
+def test_explore_mode_that_is_not_ready_shows_the_centre_only() -> None:
+    """With Grading unchecked and no sample Explore Mode grades only the centre, says why, and the empty outer cells cannot be promoted or edited."""
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_image()
+    window.explore_widget.grading_checkbox.setChecked(False)
     with patch('nss.color_gui.main_window.GradingWorker.start'):
         window.explore_checkbox.setChecked(True)
         assert window.grid_states[4] is not None and all(window.grid_states[i] is None for i in range(9) if i != 4)
-        assert window.statusBar().currentMessage().startswith("Explore Mode needs a colour sampled in Color Harmony")
+        assert window.statusBar().currentMessage().startswith("Explore Mode needs Grading checked, or Mixer checked and a colour sampled")
         window.explore_widget.var_slider.setValue(40)
         window.on_explore_container_clicked(0)
         window.on_explore_edit_requested(0)
     assert window.explore_widget.var_slider.value() == 40 and window.explore_checkbox.isChecked()
 
 
-def test_explore_checkbox_needs_a_sample_and_a_checked_target_but_can_always_be_left() -> None:
-    """The Explore Mode checkbox is off with a tooltip until a sample exists and Mixer or Grading is checked; once Explore Mode is on, unchecking both
-    targets disables only Random Shift and keeps the checkbox enabled and the 9 cells."""
+def test_explore_checkbox_needs_a_ready_random_shift_but_can_always_be_left() -> None:
+    """The Explore Mode checkbox is off with a tooltip unless Grading is checked or Mixer is checked with a sample; once Explore Mode is on,
+    unchecking both targets disables only Random Shift and keeps the checkbox enabled and the 9 cells."""
     app = QApplication.instance() or QApplication([])
     window = _window_with_image()
     window.grid_proxy = window.proxy_image
     explore = window.explore_widget
+    assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == ""
+    explore.grading_checkbox.setChecked(False)
     assert not window.explore_checkbox.isEnabled() and "Color Harmony" in window.explore_checkbox.toolTip()
     window.harmony_panel.add_sample(6, 3, np.array([0.6, 0.3, 0.2]), 20.0)
     assert window.explore_checkbox.isEnabled() and window.explore_checkbox.toolTip() == ""
     explore.mixer_checkbox.setChecked(False)
-    explore.grading_checkbox.setChecked(False)
     assert not window.explore_checkbox.isEnabled()
     explore.grading_checkbox.setChecked(True)
     window.explore_checkbox.setChecked(True)
@@ -888,6 +928,38 @@ def test_lightroom_request_sets_sliders_and_apply_writes_them_with_rotation(tmp_
     assert result["SplitToningShadowHue"] == "270" and result["ColorGradeMidtoneHue"] == "180" and result["ColorGradeGlobalHue"] == "10"
     assert result["SplitToningHighlightSaturation"] == "25" and result["ColorGradeGlobalLum"] == "8"
     assert result["ColorGradeBlending"] == "70" and result["SplitToningBalance"] == "-20"
+
+
+def test_lightroom_black_and_white_request_hides_mixer_and_harmony_and_writes_the_wheels(tmp_path: Path) -> None:
+    """A request without mixer keys (a black and white photo) hides the Color Mixer, Color Harmony and the unchecked Mixer checkbox; Random
+    Shift makes random looks and Apply writes the wheels."""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    _WINDOWS.append(window)
+    lines = [line for line in Path(_lightroom_request(tmp_path)).read_text(encoding="utf-8").split() if "Adjustment" not in line]
+    (tmp_path / "request.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with patch("nss.mru.MruManager.add_path"):
+        window.open_lightroom_request(lr_bridge.read_request(str(tmp_path / "request.txt")))
+    assert window.mixer_panel.isHidden() and window.harmony_panel.isHidden() and window.explore_widget.mixer_checkbox.isHidden()
+    assert not window.explore_widget.mixer_checkbox.isChecked() and window.randomize_btn.isEnabled()
+    assert window.random_mode_label.text().startswith("No colours sampled")
+    assert (window.sh_zone.hue_slider.value(), window.sh_zone.sat_slider.value(), window.sh_zone.light_slider.value()) == (200, 30, -4)
+    _finish_renders(window)
+    window.apply_to_lightroom()
+    result = dict(line.split("=") for line in (tmp_path / "result.txt").read_text(encoding="utf-8").split())
+    assert result["SplitToningShadowHue"] == "200" and result["ColorGradeMidtoneHue"] == "110" and result["SplitToningBalance"] == "-20"
+
+
+def test_lightroom_colour_request_keeps_mixer_and_harmony(tmp_path: Path) -> None:
+    """A request with mixer keys shows the Color Mixer, Color Harmony and the checked Mixer checkbox."""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    _WINDOWS.append(window)
+    with patch("nss.mru.MruManager.add_path"):
+        window.open_lightroom_request(lr_bridge.read_request(_lightroom_request(tmp_path)))
+    assert not window.mixer_panel.isHidden() and not window.harmony_panel.isHidden() and not window.explore_widget.mixer_checkbox.isHidden()
+    assert window.explore_widget.mixer_checkbox.isChecked()
+    window.close()
 
 
 def test_lightroom_close_without_apply_writes_nothing(tmp_path: Path) -> None:

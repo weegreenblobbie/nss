@@ -3,7 +3,7 @@
 --      or the first selected when Lightroom reports none; the others are the frames, in the order Lightroom lists them (at most
 --      Config.stackMaxFrames of them).  The target can be changed in the window, so this only has to be a good guess.
 --   2. export every photo as a 16-bit Adobe RGB TIFF, every edit and the crop baked in
---   3. pick an output <name>_clean.tif (or _focus.tif) for EVERY photo, next to its original (then _clean_2 ...; never overwrites), or in
+--   3. pick an output <name>_clean.tif (_clean2.tif, _focus.tif) for EVERY photo, next to its original (then _clean_2 ...; never overwrites), or in
 --      Config.stackFallbackFolder when that folder is not writable: the window writes the one of whichever photo ends up as the target
 --   4. write the request file (plugin/stack_bridge.py), run Config.stackLauncher (python focus_stack.py --lightroom) and wait for it
 --   5. saved: import the output stacked above the photo that was the target (the result says which) and select it; cancelled: nothing;
@@ -184,7 +184,7 @@ local function runIn(context, mode)
   if not done then error(handOverErr, 0) end
 end
 
--- mode is 'clean' or 'focus'; call from a task.
+-- mode is 'clean', 'clean2' or 'focus'; call from a task.
 function M.run(mode)
   LrFunctionContext.callWithContext('nssStack', function(context) runIn(context, mode) end)
 end

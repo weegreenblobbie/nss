@@ -43,7 +43,7 @@ from PyQt6.QtGui import (
 from nss.tiff_file import TiffFile
 from nss.image_utils import downsample_image
 from nss.color_explore.state import StateNode, create_default_state
-from nss.color_explore.random_shift import ShiftColors, shift_colors, random_shift, explore_states
+from nss.color_explore.random_shift import ShiftColors, shift_colors, random_shift, explore_states, random_look, explore_looks
 from nss.color_grading.grading import Grading
 from nss.mru import MruManager
 
@@ -64,6 +64,7 @@ RENDER_DEBOUNCE_MS = 150    # a slider drag re-grades the preview once it pauses
 DRAG_PREVIEW_DIM = 600      # max dimension of the preview rendered while a Color Mixer slider is held; release renders the 1200 px proxy
 GRID_DIM = 400              # max dimension of the images graded for the 3x3 explore grid (about the size of a grid cell on screen)
 GRID_THREADS = 8            # grid cells graded at the same time
+RANDOM_SHIFT_NEEDS = "needs Grading checked, or Mixer checked and a colour sampled in Color Harmony"     # what random_shift_ready asks for
 # Lightroom wheel name, grading_kwargs prefix, StateNode prefix
 LIGHTROOM_WHEELS = (("shadows", "sh", "shadow"), ("midtones", "mi", "midtone"), ("highlights", "hi", "highlight"), ("global", "gl", "global"))
 
@@ -604,6 +605,11 @@ class MainWindow(QMainWindow):
         self.randomize_btn.clicked.connect(self.on_randomize_clicked)
         harmony_layout.addWidget(self.randomize_btn)
 
+        # Which shift Random Shift and Explore Mode make: toward the samples, or random looks without them
+        self.random_mode_label = QLabel()
+        self.random_mode_label.setWordWrap(True)
+        harmony_layout.addWidget(self.random_mode_label)
+
         # Variation Strength Slider positioned below Generate button
         harmony_layout.addWidget(self.explore_widget.var_label)
         harmony_layout.addWidget(self.explore_widget.var_slider)
@@ -883,8 +889,8 @@ class MainWindow(QMainWindow):
             self.request_preview(state)
 
     def start_explore_mutations_render(self, center_state: StateNode) -> None:
-        """Cancels a running grid render, generates 8 random shifts around center_state and grades them in a GradingWorker.  When Random Shift is
-        not ready only the centre is graded and the status bar says why."""
+        """Cancels a running grid render, generates 8 random shifts around center_state (random looks without samples) and grades them in a
+        GradingWorker.  When Random Shift is not ready only the centre is graded and the status bar says why."""
         if self.proxy_image is None:
             return
             
@@ -897,12 +903,14 @@ class MainWindow(QMainWindow):
 
         # Generate 8 random shifts around center
         explore = self.explore_widget
-        if self.random_shift_ready():
+        if self.random_shift_ready() and self.harmony_panel.samples:
             self.grid_states = explore_states(center_state, self.selected_colors(center_state), explore.variation_strength,
                                               explore.mixer_checkbox.isChecked(), explore.grading_checkbox.isChecked(), self.rng)
+        elif self.random_shift_ready():
+            self.grid_states = explore_looks(center_state, explore.variation_strength, self.rng)
         else:
             self.grid_states = [center_state.copy() if i == 4 else None for i in range(9)]
-            self.statusBar().showMessage("Explore Mode needs a colour sampled in Color Harmony and Mixer or Grading checked: showing the centre only.")
+            self.statusBar().showMessage(f"Explore Mode {RANDOM_SHIFT_NEEDS}: showing the centre only.")
 
         # Explicitly clear the 8 outer image containers (excluding center index 4) to indicate a visual refresh
         for idx in range(9):
@@ -995,19 +1003,25 @@ class MainWindow(QMainWindow):
         return downsample_image(self.master_image, max_dim=max(1, round(max(h, w) * fit)))
 
     def random_shift_ready(self) -> bool:
-        """True while Random Shift has a colour to aim at and something to change: a Color Harmony sample and Mixer or Grading checked."""
+        """True while Random Shift has something to change: Grading checked, or Mixer checked with a Color Harmony sample (the mixer shift aims
+        at the sampled colours; without samples Random Shift makes random_look, which moves the wheels only)."""
         explore = self.explore_widget
-        return bool(self.harmony_panel.samples) and (explore.mixer_checkbox.isChecked() or explore.grading_checkbox.isChecked())
+        return explore.grading_checkbox.isChecked() or (bool(self.harmony_panel.samples) and explore.mixer_checkbox.isChecked())
 
     def update_random_shift_enabled(self) -> None:
-        """Enables the Random Shift button only while random_shift_ready."""
+        """Enables the Random Shift button only while random_shift_ready; random_mode_label says whether it shifts toward samples or makes random looks."""
         self.randomize_btn.setEnabled(self.random_shift_ready())
+        count = len(self.harmony_panel.samples)
+        if count:
+            self.random_mode_label.setText(f"Shifting toward {count} sampled colour{'s' if count > 1 else ''}.")
+        else:
+            self.random_mode_label.setText("No colours sampled: random grading of Shadows, Midtones and Highlights.")
 
     def update_explore_enabled(self) -> None:
         """Enables the Explore Mode checkbox while random_shift_ready or Explore Mode is on (so it can always be left); the tooltip says why it is off."""
         enabled = self.random_shift_ready() or self.explore_checkbox.isChecked()
         self.explore_checkbox.setEnabled(enabled)
-        self.explore_checkbox.setToolTip("" if enabled else "Needs a colour sampled in Color Harmony and Mixer or Grading checked.")
+        self.explore_checkbox.setToolTip("" if enabled else f"Explore Mode {RANDOM_SHIFT_NEEDS}.")
 
     def selected_colors(self, state: StateNode) -> ShiftColors:
         """The Color Harmony samples as random_shift colours: each sample's mixer hue, that hue on the grading wheel less state's Rotation (so it
@@ -1019,7 +1033,8 @@ class MainWindow(QMainWindow):
                             state["balance"], state["blending"])
 
     def on_randomize_clicked(self) -> None:
-        """Random Shift: in Explore Mode re-rolls the 8 outer images around the centre, otherwise shifts the current sliders (random_shift) as one undo step."""
+        """Random Shift: in Explore Mode re-rolls the 8 outer images around the centre, otherwise shifts the current sliders as one undo step
+        (random_shift toward the samples, random_look without them)."""
         if self.proxy_image is None:
             return
         state = self.rebuild_state_node_from_memento(self.state_manager.capture_snapshot())
@@ -1027,8 +1042,12 @@ class MainWindow(QMainWindow):
             self.start_explore_mutations_render(state)
             return
         explore = self.explore_widget
-        self.apply_state_node_to_widgets(random_shift(state, self.selected_colors(state), explore.variation_strength,
-                                                      explore.mixer_checkbox.isChecked(), explore.grading_checkbox.isChecked(), self.rng))
+        if self.harmony_panel.samples:
+            shifted = random_shift(state, self.selected_colors(state), explore.variation_strength,
+                                   explore.mixer_checkbox.isChecked(), explore.grading_checkbox.isChecked(), self.rng)
+        else:
+            shifted = random_look(state, explore.variation_strength, self.rng)
+        self.apply_state_node_to_widgets(shifted)
         self.on_discrete_action()
         self.statusBar().showMessage("Random Shift applied.")
 
@@ -1363,9 +1382,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Successfully saved graded image to {save_path}")
 
     def open_lightroom_request(self, request: lr_bridge.Request) -> None:
-        """Loads the request's TIFF, sets the Color Mixer, the four wheels, Blending and Balance to its Lightroom values (one undo step) and adds the Apply to Lightroom button."""
+        """Loads the request's TIFF, sets the Color Mixer, the four wheels, Blending and Balance to its Lightroom values (one undo step) and adds the Apply to Lightroom button.
+        A black and white photo (request.grayscale) has no Color Mixer, and its grey samples give Color Harmony nothing to work on: both panels
+        and the Mixer checkbox are hidden (unchecked), so Random Shift makes random looks."""
         self.lightroom_request = request
         self.load_file(request.tiff)
+        if request.grayscale:
+            self.mixer_panel.setVisible(False)
+            self.harmony_panel.setVisible(False)
+            self.explore_widget.mixer_checkbox.setChecked(False)
+            self.explore_widget.mixer_checkbox.setVisible(False)
         state = self.rebuild_state_node_from_memento(self.state_manager.capture_snapshot())
         for name, _, prefix in LIGHTROOM_WHEELS:
             hue, sat, lum = request.wheels[name]

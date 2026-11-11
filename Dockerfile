@@ -24,8 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install core test dependencies (using headless OpenCV!)
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir pytest numpy opencv-python-headless
+RUN pip install --no-cache-dir --upgrade pip pytest numpy opencv-python-headless
 
 # Node 22 (includes npm), then Claude Code, both as root
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -43,5 +42,6 @@ ENV PATH="/home/ubuntu/.local/bin:${PATH}"
 
 ENV CLAUDE_CONFIG_DIR="/home/ubuntu/.claude"
 
-# Verify installation when the container is run
-CMD ["claude", "--dangerously-skip-permissions"]
+# ENTRYPOINT so arguments given to `docker run` (e.g. --resume <uuid>) are appended to claude
+ENTRYPOINT ["claude", "--dangerously-skip-permissions"]
+CMD []

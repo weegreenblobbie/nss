@@ -72,3 +72,8 @@ def test_unknown_status_is_refused() -> None:
     """Only saved, cancelled and error are statuses."""
     with pytest.raises(ValueError, match="status"):
         sb.result_lines("done")
+
+
+def test_clean2_mode_is_accepted(tmp_path: Path) -> None:
+    """clean2 (Stack: Clean v2) comes through as the mode."""
+    assert sb.read_request(write_request(tmp_path / "r.txt", mode="clean2")).mode == "clean2"

@@ -1,4 +1,5 @@
-"""Random Shift: random slider shifts toward the colours sampled in Color Harmony (the Explore & Harmony controls and the Explore grid)."""
+"""Random Shift: random slider shifts toward the colours sampled in Color Harmony (the Explore & Harmony controls and the Explore grid), or
+random wheel looks when no colour is sampled."""
 from typing import List, NamedTuple
 
 import numpy as np
@@ -78,3 +79,23 @@ def random_shift(state: StateNode, colors: ShiftColors, strength: float, mixer: 
 def explore_states(center: StateNode, colors: ShiftColors, strength: float, mixer: bool, grading: bool, rng: np.random.Generator) -> List[StateNode]:
     """The 3x3 explore grid: a copy of center at index 4, around it 8 independent random_shift(center, ...)."""
     return [center.copy() if i == 4 else random_shift(center, colors, strength, mixer, grading, rng) for i in range(9)]
+
+
+def random_look(state: StateNode, strength: float, rng: np.random.Generator) -> StateNode:
+    """A copy of state with every tonal wheel moved at random, for grading without sampled colours; strength 0..1 is Variation Strength / 100
+    and every r is uniform in [-1, 1], drawn from rng.  A wheel with sat 0 gets the hue (r + 1) * 180 (uniform over the wheel), a wheel with
+    colour its own hue + r * strength * 360 (wrapped); sat + |r| * strength (clamped to 1) and light + r * strength (clamped -1..1).
+    The mixer, Global, Blending and Balance are kept."""
+    out = state.copy()
+    for prefix in ZONES:
+        r_hue, r_sat, r_light = rng.uniform(-1.0, 1.0, 3)
+        hue = (r_hue + 1.0) * 180.0 if state[f"{prefix}_sat"] == 0.0 else state[f"{prefix}_hue"] + r_hue * strength * 360.0
+        out[f"{prefix}_hue"] = float(np.rint(hue) % 360.0)
+        out[f"{prefix}_sat"] = float(min(np.rint(100.0 * (state[f"{prefix}_sat"] + abs(r_sat) * strength)), 100.0) / 100.0)
+        out[f"{prefix}_light"] = float(np.clip(np.rint(100.0 * (state[f"{prefix}_light"] + r_light * strength)), -100.0, 100.0) / 100.0)
+    return out
+
+
+def explore_looks(center: StateNode, strength: float, rng: np.random.Generator) -> List[StateNode]:
+    """The 3x3 explore grid without sampled colours: a copy of center at index 4, around it 8 independent random_look(center, ...)."""
+    return [center.copy() if i == 4 else random_look(center, strength, rng) for i in range(9)]

@@ -1,4 +1,4 @@
--- Library > Plug-in Extras > nss > Stack: Clean (the work is in Stack.lua)
+-- Library > Plug-in Extras > nss > Stack: Clean v1 (the work is in Stack.lua)
 local LrTasks = import 'LrTasks'
 local LrDialogs = import 'LrDialogs'
 local Stack = require 'Stack'

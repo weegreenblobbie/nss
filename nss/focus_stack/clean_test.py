@@ -11,6 +11,7 @@ from nss.focus_stack.clean import (
     foreground_blobs,
     global_gain,
     pairwise_plate,
+    plate_mix,
     plate_labels,
     ring_prior,
     stack_clean,
@@ -321,6 +322,7 @@ def test_stack_clean2_removes_a_person_that_is_elsewhere_in_the_other_frames() -
     plan = stack_clean2(target, frames, work_dim=640)
     assert plan.weights.shape == (5, *SHAPE) and plan.median.shape == (*SHAPE, 3)
     assert not plan.plate_is_median
+    assert plan.plate_mix.shape == (*SHAPE, 5) and np.allclose(plan.plate_mix.sum(axis=-1), 1.0)
     assert np.allclose(plan.weights.sum(axis=0), 1.0, atol=1e-5)
     row, col = PERSON_SPOTS[0]
     person = (slice(row + 5, row + 65), slice(col + 5, col + 35))
@@ -358,10 +360,13 @@ def test_pairwise_plate_is_the_mean_of_the_two_closest_covering_layers() -> None
     covered[1][5:15, 8:20] = False
     layers[2][5:15, 8:20] = 0.30
     layers[3][5:15, 8:20] = 0.45
-    plate = pairwise_plate(layers, covered, sigma=0.5)
+    plate, pair = pairwise_plate(layers, covered, sigma=0.5)
     assert plate.shape == (30, 40, 3) and plate.dtype == np.float32
     assert np.allclose(plate[7:13, 10:18], 0.375, atol=1e-5)  # layers 2 and 3
     assert np.allclose(plate[20:, 25:], 0.30, atol=1e-5)
+    assert pair.shape == (30, 40, 2) and pair.dtype == np.int16
+    assert (pair[7:13, 10:18] == (2, 3)).all()                # the indices say which layers the plate is the mean of
+    assert (pair[20:, 25:] == (0, 1)).all()
 
 
 def test_choose_plate_takes_the_median_or_the_pairwise_plate_by_which_fits_the_surroundings() -> None:
@@ -373,13 +378,14 @@ def test_choose_plate_takes_the_median_or_the_pairwise_plate_by_which_fits_the_s
     median[18:25, 25:34] = 0.9                               # the median has a person, the pairwise plate is close to its surroundings
     pairwise[18:25, 25:34] = 0.48
     trusted = np.ones((30, 40), dtype=bool)
-    plate = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
+    plate, use_median = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
     assert plate.shape == (30, 40, 3) and plate.dtype == np.float32
     assert np.allclose(plate[6:9, 6:11], 0.52, atol=1e-5)
     assert np.allclose(plate[19:24, 26:33], 0.48, atol=1e-5)
     assert np.allclose(plate[:4], 0.5)
+    assert use_median[6:9, 6:11].all() and not use_median[19:24, 26:33].any() and not use_median[:4].any()
     trusted[5:10, 5:12] = False                              # no majority of layers backs the median there: the pairwise plate stays
-    plate = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
+    plate, use_median = choose_plate(pairwise, median, trusted, sigma=0.5, ring_radius=5)
     assert np.allclose(plate[6:9, 6:11], 0.1, atol=1e-5)
 
 
@@ -416,3 +422,32 @@ def test_plate_labels_leave_a_blob_alone_where_the_target_is_already_close_to_th
     assert (plate_labels(deviation, covered, blobs, own_grow=1) == 0).all()
     deviation[0, 10:20, 3:15] = 0.3                          # a real person: the cleanest frame takes the blob
     assert (plate_labels(deviation, covered, blobs, own_grow=1)[10:20, 3:15] == 1).all()
+
+
+def test_plate_mix_says_how_the_layers_and_median_make_the_plate() -> None:
+    """Half on each of a pixel's two layers, or all on the median; applying it to the layers gives back the plate it came from."""
+    layers, covered = flat_layers([0.30, 0.30, 0.30, 0.45])
+    layers[0][5:15, 8:20] = 0.9
+    layers[2][5:15, 8:20] = 0.35
+    covered[1][5:15, 8:20] = False
+    median = np.full_like(layers[0], 0.6)
+    pairwise, pair = pairwise_plate(layers, covered, sigma=0.5)
+    use_median = np.zeros(pairwise.shape[:2], dtype=bool)
+    use_median[20:, 25:] = True
+    plate = np.where(use_median[..., None], median, pairwise)
+    mix = plate_mix(pair, use_median, len(layers))
+    assert mix.shape == (30, 40, 5) and mix.dtype == np.float32
+    assert np.allclose(mix.sum(axis=-1), 1.0)
+    assert np.allclose(mix[7:13, 10:18, [2, 3]], 0.5) and not mix[7:13, 10:18, [0, 1, 4]].any()
+    assert np.allclose(mix[20:, 25:, 4], 1.0) and not mix[20:, 25:, :4].any()
+    assert np.allclose(sum(mix[..., k, None] * layer for k, layer in enumerate(layers + [median])), plate, atol=1e-5)
+
+
+def test_full_size_render_of_clean2_with_its_plate_mix_gives_its_own_result() -> None:
+    """When the working size is the full size, rendering from the frames with `plate_mix` reproduces the plate-based working result."""
+    from nss.focus_stack.stack import render_full
+    target, frames = make_people_pair()
+    plan = stack_clean2(target, frames, work_dim=640)
+    assert plan.result.shape[:2] == target.shape[:2]
+    full = render_full(target, frames, plan.frames, plan.weights, tile_rows=100, plate_mix=plan.plate_mix)
+    assert np.abs(full - plan.result).max() < 0.02

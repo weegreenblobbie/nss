@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"clean plate ({'pairwise' if args.mode == 'clean2' else 'median'}): used for {100.0 * (out.labels == len(out.frames) + 1).mean():.1f}% of the picture")
     if args.debug_dir is not None:
         write_debug_images(args.debug_dir, out)
-    target_file.array = render_full(target_file.array, frame_arrays, out.frames, out.weights, args.tile_rows, None if out.plate_is_median else out.median) if args.full_res else out.result
+    target_file.array = render_full(target_file.array, frame_arrays, out.frames, out.weights, args.tile_rows, out.plate_mix) if args.full_res else out.result
     target_file.saveas(args.output)
     rows, cols = target_file.array.shape[:2]
     print(f"replaced {100.0 * out.replaced_fraction:.1f}% of the covered area, wrote {cols}x{rows} to {args.output}")

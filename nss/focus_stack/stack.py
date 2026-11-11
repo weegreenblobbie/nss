@@ -61,7 +61,8 @@ class StackResult:
     replaced_fraction: float  # share of the pixels covered by any frame that do not take the target
     feather_sigma: float  # softness of the region edges in working pixels, as used for `weights`
     median: np.ndarray | None = None  # the clean plate, the last layer: the per-pixel median of the target and the frames, or `clean2`'s plate; None unless stacked for one
-    plate_is_median: bool = True  # False when the plate cannot be recomputed from the warped frames, so a full-size render must resample `median`
+    plate_is_median: bool = True  # False when the plate is not the per-pixel median of the warped frames (`clean2`), which `plate_mix` then describes
+    plate_mix: np.ndarray | None = None  # float32 (rows, cols, layers + 1): how much of the target, each frame and the median make the plate at each pixel; None when `plate_is_median`
 
 
 def resize_matrix(full_shape: tuple[int, int], small_shape: tuple[int, int]) -> np.ndarray:
@@ -160,14 +161,15 @@ def render_strip(
     weights: np.ndarray,
     first: int,
     last: int,
-    plate: np.ndarray | None = None,
+    plate_mix: np.ndarray | None = None,
 ) -> np.ndarray:
     """Rows `first` to `last` of the full-size composite of `target` and `sources`.
 
     `frames` and `weights` (index 0 the target, then one per frame, then the median if there is one) are at the working size,
     as `stack_frames`, `stack_clean` or an `EditState` give them. A layer with no weight in the strip is not read at all. The
-    median is computed from the strip's own warped frames, and only when some pixel of the strip uses it; with a working-size
-    `plate` (`StackResult.median` of a plan whose `plate_is_median` is False) that is resampled to the strip instead.
+    last layer, the plate, is computed from the strip's own warped frames: the per-pixel median, or with a working-size `plate_mix`
+    (`StackResult.plate_mix` of `clean2`) the mix of the target, the frames and the median it describes, where a layer the mix
+    does not use in the strip is not read either.
     """
     rows, cols = target.shape[:2]
     work_rows, work_cols = weights.shape[1:]
@@ -175,12 +177,21 @@ def render_strip(
     strip_weights = [resample_rows(weight, full, first, last) for weight in weights]
     strip = target[first:last] * strip_weights[0][..., None]
     need_plate = len(weights) == len(frames) + 2 and bool(strip_weights[-1].any())
-    need_median = need_plate and plate is None
+    # share of the strip's output that each layer, then the median, contributes through the plate
+    plate_share = [None] * (len(frames) + 2)
+    if need_plate and plate_mix is None:
+        plate_share[-1] = strip_weights[-1]
+    elif need_plate:
+        mix = resample_rows(plate_mix, full, first, last) * strip_weights[-1][..., None]
+        plate_share = [mix[..., k] if mix[..., k].any() else None for k in range(len(frames) + 2)]
+    need_median = plate_share[-1] is not None
+    if plate_share[0] is not None:
+        strip += target[first:last] * plate_share[0][..., None]
     median_layers = [target[first:last]]
     median_covered = [np.ones((last - first, cols), dtype=bool)]
-    for frame, source, weight in zip(frames, sources, strip_weights[1:]):
+    for k, (frame, source, weight) in enumerate(zip(frames, sources, strip_weights[1:]), start=1):
         used = bool(weight.any())
-        if not (used or need_median):
+        if not (used or need_median or plate_share[k] is not None):
             continue
         if frame.flow is None:
             flow = np.zeros((last - first, cols, 2), dtype=np.float32)
@@ -195,10 +206,10 @@ def render_strip(
             median_covered.append(resample_rows(frame.coverage.astype(np.float32), full, first, last) > 0.5)
         if used:
             strip += aligned * weight[..., None]
+        if plate_share[k] is not None:
+            strip += aligned * plate_share[k][..., None]
     if need_median:
-        strip += masked_median(median_layers, median_covered) * strip_weights[-1][..., None]
-    elif need_plate:
-        strip += resample_rows(plate, full, first, last) * strip_weights[-1][..., None]
+        strip += masked_median(median_layers, median_covered) * plate_share[-1][..., None]
     return strip
 
 
@@ -208,15 +219,15 @@ def render_full(
     frames: list[AlignedFrame],
     weights: np.ndarray,
     tile_rows: int,
-    plate: np.ndarray | None = None,
+    plate_mix: np.ndarray | None = None,
 ) -> np.ndarray:
     """The composite at the full size of `target`, built `tile_rows` rows at a time.
 
-    Each pixel is computed on its own, so the strip height changes the memory used and not the picture. `plate` is as for `render_strip`.
+    Each pixel is computed on its own, so the strip height changes the memory used and not the picture. `plate_mix` is as for `render_strip`.
     """
     rows = target.shape[0]
     out = np.empty_like(target)
     for first in range(0, rows, tile_rows):
         last = min(first + tile_rows, rows)
-        out[first:last] = render_strip(target, sources, frames, weights, first, last, plate)
+        out[first:last] = render_strip(target, sources, frames, weights, first, last, plate_mix)
     return out

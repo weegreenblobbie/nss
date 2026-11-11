@@ -51,6 +51,7 @@ class CanvasView(QtWidgets.QWidget):
         self._image = QtGui.QImage()
         self._target_image = QtGui.QImage()
         self._tint_image: QtGui.QImage | None = None
+        self._tint_active: int | None = None  # the active patch the tint image was built without
         self._outline: list[np.ndarray] | None = None
         self._show_target = False
         self.viewed_layer: int | None = None  # while set, the whole picture of that layer is shown and painting is off
@@ -453,9 +454,12 @@ class CanvasView(QtWidgets.QWidget):
         return QtGui.QImage(pixels.data, cols, rows, cols * 3, QtGui.QImage.Format.Format_RGB888)
 
     def _tint(self) -> QtGui.QImage:
-        """The RGBA tint of the current labels, rebuilt after an edit."""
-        if self._tint_image is None:
+        """The RGBA tint of the current labels, clear under the active patch; rebuilt after an edit or when the active patch changes."""
+        if self._tint_image is None or self._tint_active != self._state.active:
+            self._tint_active = self._state.active
             self._tint_array = np.ascontiguousarray(TINT_COLORS[self._state.labels() % len(TINT_COLORS)])
+            if self._tint_active is not None:
+                self._tint_array[self._state.active_mask()] = 0
             rows, cols = self._tint_array.shape[:2]
             self._tint_image = QtGui.QImage(self._tint_array.data, cols, rows, cols * 4, QtGui.QImage.Format.Format_RGBA8888)
         return self._tint_image

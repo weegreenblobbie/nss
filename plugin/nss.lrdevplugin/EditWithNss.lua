@@ -25,8 +25,10 @@ local function run()
   end
 
   local current = photo:getDevelopSettings()
+  -- a black and white photo has no Color Mixer keys: only its wheels are handed over, its B&W mixer stays baked into the export
+  local keys = current.ConvertToGrayscale and Keys.grading or Keys.all
   local missing = {}
-  for _, k in ipairs(Keys.all) do
+  for _, k in ipairs(keys) do
     if current[k] == nil then table.insert(missing, k) end
   end
   if #missing > 0 then
@@ -44,16 +46,17 @@ local function run()
   LrFileUtils.delete(resultPath)
 
   -- the photo's own values (also saved to disk: if Lightroom dies in the next seconds they can be restored by hand)
-  local saved, backup = {}, {}
-  for _, k in ipairs(Keys.all) do
+  local saved, backup, neutral = {}, {}, {}
+  for _, k in ipairs(keys) do
     saved[k] = current[k]
+    neutral[k] = Keys.neutral[k]
     table.insert(backup, k .. '=' .. tostring(current[k]))
   end
   writeLines(backupPath, backup)
 
   -- 1. export without the mixer and the wheels
   trace('exporting to ' .. tiff)
-  applyTo(catalog, photo, Keys.neutral, 'nss.Color: export without mixer and wheels')
+  applyTo(catalog, photo, neutral, 'nss.Color: export without mixer and wheels')
   local exportSettings = Common.tiffExportSettings(work)
   exportSettings.LR_collisionHandling = 'overwrite'
   exportSettings.LR_renamingTokensOn = true
@@ -74,7 +77,7 @@ local function run()
 
   -- 2. hand over to the GUI
   local lines = { 'tiff=' .. tiff, 'result=' .. resultPath }
-  for _, k in ipairs(Keys.all) do table.insert(lines, k .. '=' .. tostring(saved[k])) end
+  for _, k in ipairs(keys) do table.insert(lines, k .. '=' .. tostring(saved[k])) end
   local wrote, werr = writeLines(requestPath, lines)
   if not wrote then
     LrDialogs.message('nss.Color', 'Cannot write ' .. requestPath .. ': ' .. tostring(werr), 'critical')
@@ -93,15 +96,15 @@ local function run()
   end
   local values = readValues(resultPath)
   local settings, count = {}, 0
-  for _, k in ipairs(Keys.all) do
+  for _, k in ipairs(keys) do
     local value = values and tonumber(values[k])
     if value then
       settings[k] = math.floor(value + 0.5)
       count = count + 1
     end
   end
-  if count ~= #Keys.all then
-    LrDialogs.message('nss.Color', 'The result file has ' .. count .. ' of ' .. #Keys.all .. ' values; nothing was applied.', 'critical')
+  if count ~= #keys then
+    LrDialogs.message('nss.Color', 'The result file has ' .. count .. ' of ' .. #keys .. ' values; nothing was applied.', 'critical')
     return
   end
   applyTo(catalog, photo, settings, 'nss.Color')
